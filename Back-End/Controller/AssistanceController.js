@@ -11,6 +11,92 @@ const PDFDocument = require("pdfkit");
 const ExcelJS = require("exceljs");
 const path = require("path");
 const fs = require("fs");
+const AyudaSchema = require("../Models/AyudaSchema");
+
+exports.MoveAssignToReleasedStatusOnly = AsyncErrorHandler(async (req, res) => {
+  try {
+    let { assistanceId, userId } = req.body;
+
+    // 0️⃣ Validate required fields
+    if (!assistanceId || !userId) {
+      console.log("Validation failed: missing assistanceId or userId");
+      return res.status(400).json({
+        status: "fail",
+        message: "Assistance ID and User ID are required",
+      });
+    }
+
+    // 1️⃣ Validate ObjectId format
+    if (
+      !mongoose.Types.ObjectId.isValid(assistanceId) ||
+      !mongoose.Types.ObjectId.isValid(userId)
+    ) {
+      console.log("Validation failed: invalid ObjectId format");
+      return res.status(400).json({
+        status: "fail",
+        message: "Invalid ObjectId format",
+      });
+    }
+
+    // 2️⃣ Convert to ObjectId
+    assistanceId = new mongoose.Types.ObjectId(assistanceId);
+    userId = new mongoose.Types.ObjectId(userId);
+    console.log(`Converted IDs -> assistanceId: ${assistanceId}, userId: ${userId}`);
+
+    // 3️⃣ Find Ayuda record (Pending) directly
+    console.log("Searching for pending Ayuda record...");
+    const ayudaRecord = await AyudaSchema.findOne({
+      assistanceId: assistanceId,
+      beneficiaryId: userId,
+      status: "Pending",
+    });
+
+    if (!ayudaRecord) {
+      console.log("No pending Ayuda record found for this assistanceId and userId.");
+      return res.status(404).json({
+        status: "fail",
+        message: "Pending Ayuda record not found",
+      });
+    }
+    console.log(`Ayuda record found: ${ayudaRecord._id}, beneficiaryModel: ${ayudaRecord.beneficiaryModel}`);
+
+    // 4️⃣ Update Ayuda status
+    ayudaRecord.status = "Released";
+    console.log("Updating Ayuda status to 'Released'...");
+    await ayudaRecord.save();
+    console.log("Ayuda status updated successfully.");
+
+    // 5️⃣ Optionally, update AssistanceAssign status if exists
+    const assistance = await AssistanceAssign.findById(assistanceId);
+    if (assistance) {
+      console.log(`Found AssistanceAssign: ${assistance._id}, updating status to 'Released'...`);
+      assistance.status = "Released";
+      await assistance.save();
+      console.log("AssistanceAssign status updated successfully.");
+    } else {
+      console.log("No AssistanceAssign record found, skipping update.");
+    }
+
+    // 6️⃣ Return success response
+    console.log("===== MoveAssignToReleasedStatusOnly END =====");
+    res.status(200).json({
+      success: true,
+      message: "Ayuda (and Assistance if exists) status updated to Released",
+      data: {
+        ayudaId: ayudaRecord._id,
+        assistanceId: assistance ? assistance._id : null,
+        beneficiaryModel: ayudaRecord.beneficiaryModel,
+      },
+    });
+
+  } catch (error) {
+    console.error("MoveAssignToReleasedStatusOnly Error:", error);
+    res.status(500).json({
+      status: "error",
+      message: error.message,
+    });
+  }
+});
 
 const formatDate = (date) => {
   if (!date) return "N/A";
@@ -541,130 +627,41 @@ const generateExcel = async (
   res.end();
 };
 
-exports.MoveAssignToHistoryAndDelete = AsyncErrorHandler(async (req, res) => {
-  try {
-    let { rfid } = req.params;
-    const io = req.app.get("io");
-    const userId = req.user.linkId;
-    const { distributedBy, remarks } = req.body;
-
-    rfid = rfid.replace(/^RFID/i, "").trim();
-
-    const resident = await Resident.findOne({ rfid });
-    if (!resident) {
-      return res.status(404).json({
-        status: "fail",
-        message: "No resident found with this RFID",
-      });
-    }
-
-    console.log("resident",resident)
-
-    const earliestAssistance = await AssistanceAssign.aggregate([
-      { $match: { residentId: resident._id, status: "Pending" } },
-      {
-        $lookup: {
-          from: "categories",
-          localField: "categoryId",
-          foreignField: "_id",
-          as: "category",
-        },
-      },
-      { $unwind: "$category" },
-      { $sort: { scheduleDate: 1, createdAt: 1 } },
-      { $limit: 1 },
-    ]);
-
-    if (!earliestAssistance.length) {
-      return res.status(404).json({
-        status: "fail",
-        message: "No pending assistance found for this resident",
-      });
-    }
-
-    const assistance = earliestAssistance[0];
-
-    const residentName =
-      `${resident.firstname} ${resident.middlename || ""} ${resident.lastname}`.trim();
-
-    const assistanceAmount =
-      assistance.totalAmount || 0;
-
-    const history = await HistoryDistribution.create({
-      rfid: resident.rfid,
-      statusSelection: assistance.statusSelection,
-      distributionStatus: "released",
-      residentId: resident._id,
-      residentId: resident.items,
-      residentName,
-      age: resident.age,
-      gender: resident.gender,
-      barangay: resident.barangay,
-      municipality: resident.municipality,
-      contact: resident.contact,
-      userId,
-      items: assistance.items.map((item) => ({
-        itemName: item.itemName,
-        quantity: item.quantity,
-        unit: item.unit,
-      })),
-      categoryId: assistance.category._id,
-      categoryName: assistance.category.categoryName,
-      categoryDescription: assistance.category.description,
-      amount: assistance.category.amount,
-      scheduleDate: assistance.scheduleDate || null,
-      assistanceAmount,
-      distributedBy,
-      remarks,
-      distributionDate: new Date(),
-    });
-
-    const admins = await userLoginSchema.find({ role: "admin" }).select("_id");
-    const viewers = admins.map((admin) => ({ user: admin._id }));
-
-    await Notification.create({
-      types: "Release Assistance",
-      message: `Assistance for ${residentName} has been released and added to history.`,
-      viewers,
-    });
-
-    await AssistanceAssign.deleteOne({ _id: assistance._id });
-
-    io.emit("newresident-claim", history);
-
-    res.status(200).json({
-      success: true,
-      message:
-        "Earliest pending assistance moved to history, deleted, and notification created for admins",
-      data: history,
-    });
-  } catch (error) {
-    console.error("MoveEarliestPendingToHistory error:", error);
-    res.status(500).json({
-      status: "error",
-      message: error.message,
-    });
-  }
-});
-
 exports.CreateAssistance = AsyncErrorHandler(async (req, res) => {
   try {
+    const io = req.app.get("io");
     const {
+      assistanceName,
       categoryId,
       distributionType,
-      statusSelection,
-      filters = {},
       scheduleDate,
-      residentIds: bodyResidentIds,
       remarks,
+      beneficiaryLimit,
       items = [],
     } = req.body;
+
+    console.log("req.body;", req.body);
+
+    // ────────────── Validations ──────────────
+    if (!assistanceName) {
+      return res.status(400).json({
+        success: false,
+        message: "assistanceName is required",
+      });
+    }
 
     if (!distributionType) {
       return res.status(400).json({
         success: false,
         message:
           "distributionType is required (Cash, Goods, Relief, Medical, Other)",
+      });
+    }
+
+    if (!categoryId) {
+      return res.status(400).json({
+        success: false,
+        message: "categoryId is required",
       });
     }
 
@@ -676,6 +673,7 @@ exports.CreateAssistance = AsyncErrorHandler(async (req, res) => {
       });
     }
 
+    // ────────────── Process items & totalAmount ──────────────
     let processedItems = [...items];
     let totalAmount = 0;
 
@@ -684,6 +682,7 @@ exports.CreateAssistance = AsyncErrorHandler(async (req, res) => {
         (sum, item) => sum + (item.amount || 0),
         0,
       );
+
       if (totalAmount === 0) {
         totalAmount = category.amount || 0;
       }
@@ -692,90 +691,29 @@ exports.CreateAssistance = AsyncErrorHandler(async (req, res) => {
       totalAmount = category.amount || 0;
     }
 
-    let residentIds = [];
+    // ────────────── Create Assistance ──────────────
+    const assistance = await AssistanceAssign.create({
+      assistanceName, // ✅ include in DB
+      categoryId,
+      distributionType,
+      scheduleDate: scheduleDate ? new Date(scheduleDate) : null,
+      items: processedItems,
+      totalAmount,
+      beneficiaryLimit,
+      remarks,
+      status: "Pending",
+    });
 
-    if (statusSelection === "All") {
-      const query = {};
-
-      if (filters.municipality && filters.municipality !== "All") {
-        query.municipality = filters.municipality;
-      }
-      if (filters.barangay && filters.barangay !== "All") {
-        query.barangay = filters.barangay;
-      }
-      if (filters.search?.trim()) {
-        query.$or = [
-          { firstname: { $regex: filters.search.trim(), $options: "i" } },
-          { lastname: { $regex: filters.search.trim(), $options: "i" } },
-          { rfid: { $regex: filters.search.trim(), $options: "i" } },
-        ];
-      }
-
-      const residents = await Resident.find(query).select("_id");
-      if (!residents.length) {
-        return res.status(400).json({
-          success: false,
-          message: "No residents found based on current filters",
-        });
-      }
-      residentIds = residents.map((r) => r._id);
-    } else {
-      if (!Array.isArray(bodyResidentIds) || bodyResidentIds.length === 0) {
-        return res.status(400).json({
-          success: false,
-          message: "residentIds is required when statusSelection is not All",
-        });
-      }
-      residentIds = bodyResidentIds.map((id) =>
-        typeof id === "string" ? new mongoose.Types.ObjectId(id) : id,
-      );
-    }
-
-    const assistanceDocs = [];
-
-    for (const residentId of residentIds) {
-      const existing = await AssistanceAssign.findOne({
-        residentId: residentId,
-        categoryId: categoryId,
-        status: "Pending",
-      });
-
-      if (existing) {
-        console.log(
-          `Resident ${residentId} already has category ${categoryId}, skipping.`,
-        );
-        continue;
-      }
-
-      assistanceDocs.push({
-        residentId,
-        categoryId,
-        distributionType,
-        statusSelection,
-        scheduleDate: scheduleDate ? new Date(scheduleDate) : null,
-        items: processedItems,
-        totalAmount,
-        remarks,
-        status: "Pending",
-      });
-    }
-
-    if (!assistanceDocs.length) {
-      return res.status(400).json({
-        success: false,
-        message: "All selected residents already have this category assigned",
-      });
-    }
-
-    const saved = await AssistanceAssign.insertMany(assistanceDocs);
+    io.emit("createAssistance", assistance);
 
     return res.status(201).json({
       success: true,
-      count: saved.length,
-      data: saved,
+      message: "Assistance successfully created",
+      data: assistance,
     });
   } catch (error) {
     console.error("Error creating assistance:", error);
+
     return res.status(500).json({
       success: false,
       message: "Failed to create assistance",
@@ -817,7 +755,6 @@ exports.UpdateAssistance = AsyncErrorHandler(async (req, res) => {
     res.status(500).json({ status: "error", message: error.message });
   }
 });
-
 
 exports.DisplayAssistances = AsyncErrorHandler(async (req, res) => {
   try {
@@ -961,7 +898,6 @@ exports.DisplayAssistances = AsyncErrorHandler(async (req, res) => {
     });
   }
 });
-
 
 exports.DisplayAllAssistances = AsyncErrorHandler(async (req, res) => {
   try {
@@ -1114,7 +1050,6 @@ exports.DisplayAllAssistances = AsyncErrorHandler(async (req, res) => {
   }
 });
 
-
 exports.DisplayAssistanceById = AsyncErrorHandler(async (req, res) => {
   try {
     const { id } = req.params;
@@ -1181,84 +1116,233 @@ exports.DisplayResidentAssistanceByRFID = AsyncErrorHandler(
     try {
       let { rfid } = req.params;
 
-      rfid = rfid.replace(/^RFID/i, "").trim();
-
-      const resident = await Resident.findOne({ rfid });
-      if (!resident) {
-        return res.status(404).json({
-          status: "fail",
-          message: "No resident found with this RFID",
+      if (!rfid) {
+        return res.status(400).json({
+          success: false,
+          message: "RFID is required",
         });
       }
 
-      const earliestAssistance = await AssistanceAssign.aggregate([
-        {
-          $match: {
-            residentId: resident._id,
-            status: "Pending",
-          },
-        },
-        {
-          $lookup: {
-            from: "categories",
-            localField: "categoryId",
-            foreignField: "_id",
-            as: "category",
-          },
-        },
-        { $unwind: "$category" },
-        { $sort: { scheduleDate: 1, createdAt: 1 } },
-        { $limit: 1 },
-        {
-          $project: {
-            _id: 1,
-            statusSelection: 1,
-            scheduleDate: 1,
-            createdAt: 1,
-            totalAmount: 1,
-            categoryId: "$category._id",
-            categoryName: "$category.categoryName",
-            categoryDescription: "$category.description",
-            amount: "$category.amount",
-            items: 1,
-          },
-        },
-      ]);
+      console.log("📌 Raw RFID:", rfid);
 
-      const assistance =
-        earliestAssistance.length > 0 ? earliestAssistance[0] : {};
+      // Remove prefix RFID if scanner sends it, and trim spaces
+      rfid = rfid.replace(/^RFID/i, "").trim();
 
+      console.log("📌 Cleaned RFID:", rfid);
+
+      // ==============================
+      // 1️⃣ FIND PERSON (Resident or Beneficiary)
+      // ==============================
+      let person = await Resident.findOne({
+        rfid: { $regex: `^${rfid}$`, $options: "i" }, // Case-insensitive
+      });
+
+      let modelType = "Resident";
+
+      if (!person) {
+        person = await Beneficiary.findOne({
+          rfid: { $regex: `^${rfid}$`, $options: "i" },
+        });
+        modelType = "Beneficiary";
+      }
+
+      if (!person) {
+        console.log("❌ Resident/Beneficiary not found");
+        return res.status(404).json({
+          success: false,
+          message: "Resident or Beneficiary not found with this RFID",
+        });
+      }
+
+      console.log("✅ Person Found:", person._id);
+      console.log("Model Type:", modelType);
+
+      // ==============================
+      // 2️⃣ FIND PENDING AYUDA RECORD
+      // ==============================
+      const ayudaRecord = await AyudaSchema.findOne({
+        beneficiaryId: person._id,
+        beneficiaryModel: modelType,
+        status: "Pending", // ✅ Filter by Pending status here
+      }).populate({
+        path: "assistanceId",
+        populate: {
+          path: "categoryId",
+        },
+      });
+
+      console.log("📌 Ayuda Record:", ayudaRecord);
+
+      if (!ayudaRecord) {
+        return res.status(404).json({
+          success: false,
+          message: "No pending assistance found for this RFID holder",
+        });
+      }
+
+      if (!ayudaRecord.assistanceId) {
+        return res.status(404).json({
+          success: false,
+          message: "Assistance record exists but assistance data missing",
+        });
+      }
+
+      const assistance = ayudaRecord.assistanceId;
+      const category = assistance.categoryId || {};
+
+      // ==============================
+      // 3️⃣ COMBINE DATA
+      // ==============================
       const combinedData = {
-        id: resident._id,
-        rfid: resident.rfid,
-        name: `${resident.firstname} ${resident.middlename || ""} ${resident.lastname}`.trim(),
-        age: resident.age,
-        gender: resident.gender,
-        barangay: resident.barangay,
-        municipality: resident.municipality,
-        contact: resident.contact,
-        items: assistance.items || [],
-        assistanceId: assistance._id || null,
-        statusSelection: assistance.statusSelection || null,
+        id: person._id,
+        rfid: person.rfid,
+        type: modelType,
+        name: `${person.firstname} ${person.middlename || ""} ${person.lastname}`.trim(),
+        age: person.age,
+        gender: person.gender,
+        barangay: person.barangay,
+        municipality: person.municipality,
+        contact: person.contact,
+
+        // Assistance Info
+        assistanceId: assistance._id,
+        status: assistance.status, // From AssistanceAssign
         scheduleDate: assistance.scheduleDate || null,
-        categoryId: assistance.categoryId || null,
-        categoryName: assistance.categoryName || null,
-        categoryDescription: assistance.categoryDescription || null,
+        items: assistance.items || [],
         totalAmount: assistance.totalAmount || 0,
-        amount: assistance.amount || null,
+
+        // Category Info
+        categoryName: category.categoryName || null,
+        categoryDescription: category.description || null,
+        amount: category.amount || 0,
       };
 
-      res.status(200).json({
+      return res.status(200).json({
         success: true,
-        message: "Resident with earliest pending assistance fetched",
+        message: "Pending assistance fetched successfully",
         data: combinedData,
       });
     } catch (error) {
-      console.error("DisplayResidentAssistanceByRFID error:", error);
-      res.status(500).json({
-        status: "error",
+      console.error("❌ DisplayResidentAssistanceByRFID error:", error);
+      return res.status(500).json({
+        success: false,
         message: error.message,
       });
     }
   },
 );
+
+exports.GetLatestAssistance = AsyncErrorHandler(async (req, res) => {
+  try {
+    // Kung gusto mo ay yung pinaka-latest record lang talaga (Limit 1)
+    // Pero kung gusto mo ng listahan na naka-sort by newest, gamitin lang ang code sa ibaba
+
+    const aggregationPipeline = [
+      // Step 1: Sort by newest created (eto ang pinaka-importante)
+      { $sort: { createdAt: -1 } },
+
+      // Step 2: Join sa Categories collection
+      {
+        $lookup: {
+          from: "categories",
+          localField: "categoryId",
+          foreignField: "_id",
+          as: "categoryDetails",
+        },
+      },
+
+      {
+        $unwind: {
+          path: "$categoryDetails",
+          preserveNullAndEmptyArrays: true,
+        },
+      },
+
+      // Step 3: Project fields
+      {
+        $project: {
+          _id: 1,
+          statusSelection: 1,
+          beneficiaryLimit: 1,
+          assistanceName: {
+            $ifNull: ["$assistanceName", "$categoryDetails.categoryName"],
+          },
+          distributionType: 1,
+          items: 1,
+          totalAmount: 1,
+          limitbeneficiary: 1,
+          scheduleDate: 1,
+          status: 1,
+          statusCreated: 1,
+          remarks: 1,
+          createdAt: 1,
+          categoryDescription: "$categoryDetails.description",
+        },
+      },
+
+      // Step 4: Kunin lang ang pinaka-una (yung pinakabago)
+      { $limit: 1 },
+    ];
+
+    const result = await AssistanceAssign.aggregate(aggregationPipeline);
+
+    if (!result || result.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: "No assistance records found.",
+      });
+    }
+
+    // JSON RESPONSE - Ibinabalik ang [0] dahil single record ang hanap
+    res.status(200).json({
+      success: true,
+      data: result[0],
+    });
+  } catch (error) {
+    console.error("API Error (GetLatestAssistance):", error);
+    res.status(500).json({
+      success: false,
+      message: "An error occurred while fetching the latest data.",
+    });
+  }
+});
+
+exports.updateStatusCreated = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const io = req.app.get("io");
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid assistanceId",
+      });
+    }
+
+    const updated = await AssistanceAssign.findByIdAndUpdate(
+      id,
+      { statusCreated: "Accomplish" },
+      { new: true },
+    );
+
+    if (!updated) {
+      return res.status(404).json({
+        success: false,
+        message: "Assistance record not found",
+      });
+    }
+
+    io.emit("latestProgramChange", updated);
+
+    res.status(200).json({
+      success: true,
+      message: "statusCreated updated to 'Accomplish'",
+      data: updated,
+    });
+  } catch (error) {
+    console.error("updateStatusCreated Error:", error);
+    res.status(500).json({
+      success: false,
+      message: "An error occurred while updating statusCreated",
+    });
+  }
+};

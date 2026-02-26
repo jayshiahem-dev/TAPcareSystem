@@ -9,6 +9,9 @@ router
 router
   .route("/DisplayAllAssistances")
   .get(authController.protect, AssistanceController.DisplayAllAssistances);
+router
+  .route("/GetLatestAssistance")
+  .get(authController.protect, AssistanceController.GetLatestAssistance);
 
 router
   .route("/:id")
@@ -16,10 +19,10 @@ router
   .delete(authController.protect, AssistanceController.DeleteAssistance);
 
 router
-  .route("/RfidID/:rfid")
+  .route("/RfidID")
   .post(
     authController.protect,
-    AssistanceController.MoveAssignToHistoryAndDelete,
+    AssistanceController.MoveAssignToReleasedStatusOnly,
   );
 
 router
@@ -31,6 +34,10 @@ router
 
 router
   .route("/report")
-  .post(authController.protect,AssistanceController.GenerateAssistanceReport);
+  .post(authController.protect, AssistanceController.GenerateAssistanceReport);
+
+router
+  .route("/updateStatusCreated/:id")
+  .patch(authController.protect, AssistanceController.updateStatusCreated);
 
 module.exports = router;

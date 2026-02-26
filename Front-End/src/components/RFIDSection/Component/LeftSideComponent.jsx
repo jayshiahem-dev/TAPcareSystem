@@ -4,19 +4,15 @@ import { RFIDContext } from "../../../contexts/RFIDContext/RfidContext";
 import { AssistanceContext } from "../../../contexts/AssignContext/AssignContext";
 import StatusModal from "../../../ReusableFolder/SuccessandField";
 
-const LeftSide = ({
-    setCurrentUser = () => {},
-    setScanStatus = () => {},
-    setIsProcessing = () => {},
-    currentUser = null,
-    isProcessing = false,
-}) => {
+const LeftSide = ({ setCurrentUser = () => {}, setScanStatus = () => {}, setIsProcessing = () => {}, currentUser = null, isProcessing = false }) => {
     const { rfidData, setRfidData } = useContext(RFIDContext);
     const { getResidentByRFID, releaseEarliestAssistance } = useContext(AssistanceContext);
     const [hasScannedNew, setHasScannedNew] = useState(false);
 
+    console.log("currentUser", currentUser);
+
     console.log("releaseEarliestAssistance", releaseEarliestAssistance);
-    
+
     // State para sa StatusModal
     const [statusModal, setStatusModal] = useState({
         isOpen: false,
@@ -24,7 +20,7 @@ const LeftSide = ({
         title: "",
         message: "",
         error: null,
-        onRetry: null
+        onRetry: null,
     });
 
     const showStatusMessage = useCallback((status, error = null, customProps = {}) => {
@@ -34,19 +30,19 @@ const LeftSide = ({
             error,
             title: customProps.title || "",
             message: customProps.message || "",
-            onRetry: customProps.onRetry || null
+            onRetry: customProps.onRetry || null,
         });
     }, []);
 
     const handleStatusModalClose = useCallback(() => {
-        setStatusModal(prev => ({ ...prev, isOpen: false }));
+        setStatusModal((prev) => ({ ...prev, isOpen: false }));
     }, []);
 
     const handleCancel = useCallback(() => {
         setHasScannedNew(false);
         setCurrentUser(null);
         setScanStatus({ type: "idle", message: "Ready for scan" });
-        if (typeof setRfidData === 'function') {
+        if (typeof setRfidData === "function") {
             setRfidData(null);
         }
     }, [setCurrentUser, setScanStatus, setRfidData]);
@@ -69,18 +65,18 @@ const LeftSide = ({
                     } else {
                         setScanStatus({ type: "error", message: result.error || "Resident not found" });
                         showStatusMessage("failed", result.error || "Resident not found with this RFID", {
-                            title: "Verification Failed"
+                            title: "Verification Failed",
                         });
-                        if (typeof setRfidData === 'function') setRfidData(null);
+                        if (typeof setRfidData === "function") setRfidData(null);
                         console.error("🔴 Verification failed:", result.error);
                     }
                 } catch (error) {
                     setScanStatus({ type: "error", message: "Connection error" });
                     showStatusMessage("failed", error.message || "Connection error while verifying RFID", {
                         title: "Connection Error",
-                        onRetry: fetchResident
+                        onRetry: fetchResident,
                     });
-                    if (typeof setRfidData === 'function') setRfidData(null);
+                    if (typeof setRfidData === "function") setRfidData(null);
                     console.error("🔴 Connection error during RFID verification:", error);
                 } finally {
                     setIsProcessing(false);
@@ -92,28 +88,34 @@ const LeftSide = ({
             setHasScannedNew(false);
             setCurrentUser(null);
             setIsProcessing(false);
-            if (typeof setRfidData === 'function') setRfidData(null);
+            if (typeof setRfidData === "function") setRfidData(null);
         };
     }, [rfidData, getResidentByRFID, setCurrentUser, setScanStatus, setIsProcessing, setRfidData, showStatusMessage]);
 
     const handleConfirmRelease = useCallback(async () => {
         if (!currentUser) {
             showStatusMessage("failed", "No resident selected for release.", {
-                title: "Release Error"
+                title: "Release Error",
             });
             return;
         }
-        
+
         setIsProcessing(true);
         try {
-            const result = await releaseEarliestAssistance(rfidData?.uid || currentUser.rfid);
+            // Dito natin ipapasa ang tatlong parameters: rfid, assistanceId, at residentId (_id)
+            const result = await releaseEarliestAssistance(
+                rfidData?.uid || currentUser.rfid,
+                currentUser.assistanceId, // Siguraduhing may assistanceId sa currentUser object
+                currentUser.id, // Ito ang current._id
+            );
+
             if (result?.success) {
                 setScanStatus({ type: "success", message: "Cash Released Successfully!" });
                 showStatusMessage("success", null, {
                     title: "Cash Released",
-                    message: `Successfully released ${formatCurrency(currentUser?.totalAmount)} to ${currentUser?.name}`
+                    message: `Successfully released ${formatCurrency(currentUser?.totalAmount)} to ${currentUser?.name}`,
                 });
-                
+
                 setTimeout(() => {
                     handleStatusModalClose();
                     setTimeout(() => {
@@ -124,20 +126,19 @@ const LeftSide = ({
                 setScanStatus({ type: "error", message: result?.message || "Failed to release" });
                 showStatusMessage("failed", result?.message || "Failed to release cash. Please try again.", {
                     title: "Release Failed",
-                    onRetry: handleConfirmRelease
+                    onRetry: handleConfirmRelease,
                 });
             }
         } catch (error) {
             setScanStatus({ type: "error", message: "A server error occurred" });
             showStatusMessage("failed", error.message || "A server error occurred while releasing cash.", {
                 title: "Server Error",
-                onRetry: handleConfirmRelease
+                onRetry: handleConfirmRelease,
             });
         } finally {
             setIsProcessing(false);
         }
     }, [currentUser, rfidData, releaseEarliestAssistance, setIsProcessing, setScanStatus, handleCancel, showStatusMessage, handleStatusModalClose]);
-
     const formatCurrency = (amount) => {
         const value = amount ?? 0;
         return `₱${value.toLocaleString("en-PH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -148,16 +149,33 @@ const LeftSide = ({
             <div className="space-y-6 lg:col-span-4">
                 <style jsx>{`
                     @keyframes tap-action {
-                        0%, 100% { transform: translateY(-40px) rotate(-5deg); opacity: 0.8; }
-                        50% { transform: translateY(0px) rotate(0deg); opacity: 1; }
+                        0%,
+                        100% {
+                            transform: translateY(-40px) rotate(-5deg);
+                            opacity: 0.8;
+                        }
+                        50% {
+                            transform: translateY(0px) rotate(0deg);
+                            opacity: 1;
+                        }
                     }
                     @keyframes wave-pulse {
-                        0% { transform: scale(1); opacity: 0.4; }
-                        100% { transform: scale(1.6); opacity: 0; }
+                        0% {
+                            transform: scale(1);
+                            opacity: 0.4;
+                        }
+                        100% {
+                            transform: scale(1.6);
+                            opacity: 0;
+                        }
                     }
-                    .animate-tap { animation: tap-action 2s ease-in-out infinite; }
-                    .animate-wave { animation: wave-pulse 2s cubic-bezier(0, 0, 0.2, 1) infinite; }
-                    
+                    .animate-tap {
+                        animation: tap-action 2s ease-in-out infinite;
+                    }
+                    .animate-wave {
+                        animation: wave-pulse 2s cubic-bezier(0, 0, 0.2, 1) infinite;
+                    }
+
                     .rfid-card-modern {
                         position: relative;
                         overflow: hidden;
@@ -175,20 +193,23 @@ const LeftSide = ({
                         border: 1px solid #334155;
                         box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.3);
                     }
-                    
+
                     .card-mesh {
                         position: absolute;
-                        top: 0; left: 0; right: 0; bottom: 0;
+                        top: 0;
+                        left: 0;
+                        right: 0;
+                        bottom: 0;
                         background-image: radial-gradient(#fb923c 0.5px, transparent 0.5px);
                         background-size: 15px 15px;
                         opacity: 0.07;
                     }
 
                     .embossed-text-orange {
-                        text-shadow: 1px 1px 0px rgba(255,255,255,0.8);
+                        text-shadow: 1px 1px 0px rgba(255, 255, 255, 0.8);
                     }
                     .dark .embossed-text-orange {
-                        text-shadow: 1px 1px 0px rgba(0,0,0,0.5);
+                        text-shadow: 1px 1px 0px rgba(0, 0, 0, 0.5);
                         color: #fb923c;
                     }
 
@@ -206,12 +227,17 @@ const LeftSide = ({
                     {/* Header Status */}
                     <div className="mb-8 flex items-center justify-between">
                         <div className="flex items-center gap-2">
-                            <div className={`h-2 w-2 rounded-full ${hasScannedNew ? "bg-orange-500 shadow-[0_0_8px_#f97316]" : "animate-pulse bg-slate-200 dark:bg-slate-700"}`} />
+                            <div
+                                className={`h-2 w-2 rounded-full ${hasScannedNew ? "bg-orange-500 shadow-[0_0_8px_#f97316]" : "animate-pulse bg-slate-200 dark:bg-slate-700"}`}
+                            />
                             <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-400 dark:text-slate-500">
                                 {hasScannedNew ? "Verified Resident" : "System Ready"}
                             </span>
                         </div>
-                        <Wifi size={16} className={hasScannedNew ? "text-orange-500" : "text-slate-200 dark:text-slate-700"} />
+                        <Wifi
+                            size={16}
+                            className={hasScannedNew ? "text-orange-500" : "text-slate-200 dark:text-slate-700"}
+                        />
                     </div>
 
                     {!hasScannedNew ? (
@@ -220,21 +246,29 @@ const LeftSide = ({
                             <div className="relative flex flex-col items-center justify-center">
                                 <div className="animate-tap z-20 mb-4">
                                     <div className="rfid-card-modern card-light dark:card-dark h-20 w-32 rounded-2xl p-3">
-                                        <div className="h-4 w-6 rounded-sm bg-orange-200/50 dark:bg-orange-500/20 shadow-inner" />
+                                        <div className="h-4 w-6 rounded-sm bg-orange-200/50 shadow-inner dark:bg-orange-500/20" />
                                         <div className="mt-6 flex justify-end">
-                                            <Rss size={18} className="-rotate-45 text-orange-200 dark:text-orange-900/40" />
+                                            <Rss
+                                                size={18}
+                                                className="-rotate-45 text-orange-200 dark:text-orange-900/40"
+                                            />
                                         </div>
                                     </div>
                                 </div>
                                 <div className="relative mt-4 flex h-32 w-32 items-center justify-center">
                                     <div className="animate-wave absolute h-24 w-24 rounded-full bg-orange-100 dark:bg-orange-500/10" />
                                     <div className="relative z-10 rounded-full bg-slate-50 p-7 dark:bg-slate-800">
-                                        <Hand size={54} className="text-orange-400 opacity-60 dark:text-orange-500/40" />
+                                        <Hand
+                                            size={54}
+                                            className="text-orange-400 opacity-60 dark:text-orange-500/40"
+                                        />
                                     </div>
                                 </div>
                                 <div className="mt-10 text-center">
                                     <h3 className="text-lg font-black uppercase tracking-tight text-slate-800 dark:text-white">RFID Scanner</h3>
-                                    <p className="mt-2 text-[11px] font-medium text-slate-400 dark:text-slate-500 tracking-wide">Place resident card near the sensor</p>
+                                    <p className="mt-2 text-[11px] font-medium tracking-wide text-slate-400 dark:text-slate-500">
+                                        Place resident card near the sensor
+                                    </p>
                                 </div>
                             </div>
                         </div>
@@ -247,8 +281,12 @@ const LeftSide = ({
                                     <User size={24} />
                                 </div>
                                 <div>
-                                    <h2 className="text-xl font-black uppercase text-slate-800 dark:text-white tracking-tight leading-none">{currentUser?.name}</h2>
-                                    <p className="text-[9px] font-bold text-orange-500 uppercase tracking-widest mt-1.5 opacity-80">Authenticated Profile</p>
+                                    <h2 className="text-xl font-black uppercase leading-none tracking-tight text-slate-800 dark:text-white">
+                                        {currentUser?.name}
+                                    </h2>
+                                    <p className="mt-1.5 text-[9px] font-bold uppercase tracking-widest text-orange-500 opacity-80">
+                                        Authenticated Profile
+                                    </p>
                                 </div>
                             </div>
 
@@ -267,11 +305,16 @@ const LeftSide = ({
                                                     </div>
                                                 </div>
                                                 <div className="text-right">
-                                                    <Wifi size={20} className="rotate-90 text-orange-200 dark:text-slate-600 ml-auto" />
-                                                    <p className="text-[7px] font-black uppercase tracking-tighter text-slate-300 dark:text-slate-600 mt-1">Contactless</p>
+                                                    <Wifi
+                                                        size={20}
+                                                        className="ml-auto rotate-90 text-orange-200 dark:text-slate-600"
+                                                    />
+                                                    <p className="mt-1 text-[7px] font-black uppercase tracking-tighter text-slate-300 dark:text-slate-600">
+                                                        Contactless
+                                                    </p>
                                                 </div>
                                             </div>
-                                            
+
                                             <div className="mt-8">
                                                 <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-orange-300 dark:text-slate-500">
                                                     Total Amount
@@ -281,27 +324,33 @@ const LeftSide = ({
                                                 </p>
                                             </div>
 
-                                            <div className="mt-10 flex items-end justify-between border-t border-orange-50 dark:border-slate-800 pt-5">
+                                            <div className="mt-10 flex items-end justify-between border-t border-orange-50 pt-5 dark:border-slate-800">
                                                 <div>
-                                                    <p className="text-[8px] font-bold uppercase text-slate-300 dark:text-slate-600 mb-0.5 tracking-widest">Card Holder</p>
-                                                    <p className="text-sm font-black text-slate-700 dark:text-slate-200 uppercase tracking-wider">{currentUser?.name}</p>
+                                                    <p className="mb-0.5 text-[8px] font-bold uppercase tracking-widest text-slate-300 dark:text-slate-600">
+                                                        Card Holder
+                                                    </p>
+                                                    <p className="text-sm font-black uppercase tracking-wider text-slate-700 dark:text-slate-200">
+                                                        {currentUser?.name}
+                                                    </p>
                                                 </div>
                                                 <div className="rounded-xl bg-orange-600 px-4 py-2 text-white shadow-lg shadow-orange-200 dark:shadow-none">
-                                                    <p className="text-[10px] font-black italic tracking-widest uppercase">{currentUser?.categoryName || "RESIDENT"}</p>
+                                                    <p className="text-[10px] font-black uppercase italic tracking-widest">
+                                                        {currentUser?.categoryName || "RESIDENT"}
+                                                    </p>
                                                 </div>
                                             </div>
                                         </div>
-                                        <div className="absolute -right-10 -bottom-10 h-32 w-32 rounded-full bg-orange-500/5 blur-3xl" />
+                                        <div className="absolute -bottom-10 -right-10 h-32 w-32 rounded-full bg-orange-500/5 blur-3xl" />
                                     </div>
                                 )}
 
                                 {/* Additional Details - Status & Age */}
                                 <div className="grid grid-cols-2 gap-4">
-                                    <div className="rounded-3xl bg-slate-50 p-5 dark:bg-slate-800/50 border border-transparent dark:border-slate-800">
+                                    <div className="rounded-3xl border border-transparent bg-slate-50 p-5 dark:border-slate-800 dark:bg-slate-800/50">
                                         <p className="text-[9px] font-bold uppercase text-slate-400 dark:text-slate-500">Status</p>
                                         <p className="mt-1 text-sm font-black text-slate-700 dark:text-slate-300">ELIGIBLE</p>
                                     </div>
-                                    <div className="rounded-3xl bg-slate-50 p-5 dark:bg-slate-800/50 border border-transparent dark:border-slate-800">
+                                    <div className="rounded-3xl border border-transparent bg-slate-50 p-5 dark:border-slate-800 dark:bg-slate-800/50">
                                         <p className="text-[9px] font-bold uppercase text-slate-400 dark:text-slate-500">Current Age</p>
                                         <p className="mt-1 text-sm font-black text-slate-700 dark:text-slate-300">{currentUser?.age ?? 0} Years</p>
                                     </div>
@@ -309,16 +358,22 @@ const LeftSide = ({
 
                                 {/* --- ITEMS SECTION --- */}
                                 {currentUser?.items?.length > 0 && (
-                                    <div className="rounded-3xl bg-slate-50 p-5 dark:bg-slate-800/50 border border-transparent dark:border-slate-800">
-                                        <div className="flex items-center gap-2 mb-3">
-                                            <Package size={18} className="text-orange-500" />
-                                            <p className="text-[9px] font-bold uppercase text-slate-400 dark:text-slate-500 tracking-widest">
+                                    <div className="rounded-3xl border border-transparent bg-slate-50 p-5 dark:border-slate-800 dark:bg-slate-800/50">
+                                        <div className="mb-3 flex items-center gap-2">
+                                            <Package
+                                                size={18}
+                                                className="text-orange-500"
+                                            />
+                                            <p className="text-[9px] font-bold uppercase tracking-widest text-slate-400 dark:text-slate-500">
                                                 Assistance Items ({currentUser.items.length})
                                             </p>
                                         </div>
                                         <div className="space-y-1">
                                             {currentUser.items.map((item, idx) => (
-                                                <div key={idx} className="item-row text-xs">
+                                                <div
+                                                    key={idx}
+                                                    className="item-row text-xs"
+                                                >
                                                     <span className="font-medium text-slate-700 dark:text-slate-300">
                                                         {item.itemName}
                                                         <span className="ml-1 text-[10px] text-slate-500 dark:text-slate-400">
@@ -338,17 +393,16 @@ const LeftSide = ({
                                     onClick={handleConfirmRelease}
                                     disabled={
                                         isProcessing ||
-                                        ((currentUser?.totalAmount ?? 0) <= 0 &&
-                                        (!currentUser?.items || currentUser.items.length === 0))
+                                        ((currentUser?.totalAmount ?? 0) <= 0 && (!currentUser?.items || currentUser.items.length === 0))
                                     }
-                                    className="group w-full overflow-hidden rounded-[1.5rem] bg-orange-600 py-5 text-xs font-black tracking-widest text-white shadow-xl shadow-orange-100 dark:shadow-none transition-all hover:bg-orange-700 active:scale-95 disabled:opacity-30 disabled:grayscale"
+                                    className="group w-full overflow-hidden rounded-[1.5rem] bg-orange-600 py-5 text-xs font-black tracking-widest text-white shadow-xl shadow-orange-100 transition-all hover:bg-orange-700 active:scale-95 disabled:opacity-30 disabled:grayscale dark:shadow-none"
                                 >
                                     {isProcessing ? "PROCESSING..." : "CONFIRM RELEASE"}
                                 </button>
-                                
+
                                 <button
                                     onClick={handleCancel}
-                                    className="flex items-center justify-center gap-2 rounded-[1.5rem] border border-orange-100 dark:border-slate-800 py-4 text-[10px] font-black uppercase tracking-widest text-orange-400 dark:text-slate-500 hover:bg-orange-50 dark:hover:bg-slate-800 transition-all"
+                                    className="flex items-center justify-center gap-2 rounded-[1.5rem] border border-orange-100 py-4 text-[10px] font-black uppercase tracking-widest text-orange-400 transition-all hover:bg-orange-50 dark:border-slate-800 dark:text-slate-500 dark:hover:bg-slate-800"
                                 >
                                     <X size={16} /> Cancel Session
                                 </button>

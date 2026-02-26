@@ -116,10 +116,9 @@ const Category = () => {
                 setIsSearching(true);
             }
 
-            fetchCategories(CurrentPage, 10, debouncedSearchTerm)
-                .finally(() => {
-                    setIsSearching(false);
-                });
+            fetchCategories(CurrentPage, 10, debouncedSearchTerm).finally(() => {
+                setIsSearching(false);
+            });
         }
     }, [CurrentPage, debouncedSearchTerm, fetchCategories]);
 
@@ -132,7 +131,6 @@ const Category = () => {
 
     // Modified handleAddItem to use context createCategory function
     const handleAddItem = async () => {
-
         setFormError("");
 
         // Validation - inalis ang amount validation
@@ -198,59 +196,59 @@ const Category = () => {
         setFormError("");
     };
 
-const handleSaveEdit = async () => {
-    // Reset form error
-    setFormError("");
+    const handleSaveEdit = async () => {
+        // Reset form error
+        setFormError("");
 
-    // Validation - inalis ang amount validation
-    if (!newItem.category || !newItem.category.trim()) {
-        setFormError("Category name is required");
-        return;
-    }
-
-    if (!editingItem || !editingItem._id) {
-        setFormError("No item selected for editing");
-        return;
-    }
-
-    const payload = {
-        category: newItem.category.trim(),
-        description: newItem.description ? newItem.description.trim() : "",
-    };
-
-    try {
-        const result = await updateCategory(editingItem._id, payload);
-        if (result && result.success) {
-            setEditingItem(null);
-            setNewItem({ category: "", description: "" });
-            setIsModalOpen(false);
-            // Refresh ang data
-            if (fetchCategories) {
-                await fetchCategories(CurrentPage, 10, debouncedSearchTerm);
-            }
-            // Show success message
-            showStatusMessage("success", null, {
-                title: "Category Updated",
-                message: `"${payload.category}" has been successfully updated.`,
-            });
-        } else {
-            // Show error message kung hindi success
-            showStatusMessage("error", result?.error || "Failed to update category", {
-                title: "Update Failed",
-                onRetry: handleSaveEdit, // Optional: allow retry
-            });
-            // Pwede ring i-set ang form error kung gusto mo
-            setFormError(result?.error || "Failed to update category");
+        // Validation - inalis ang amount validation
+        if (!newItem.category || !newItem.category.trim()) {
+            setFormError("Category name is required");
+            return;
         }
-    } catch (err) {
-        console.error("Update category failed:", err);
-        setFormError("Failed to update category");
-        showStatusMessage("error", err.message, {
-            title: "Update Error",
-            onRetry: handleSaveEdit,
-        });
-    }
-};
+
+        if (!editingItem || !editingItem._id) {
+            setFormError("No item selected for editing");
+            return;
+        }
+
+        const payload = {
+            category: newItem.category.trim(),
+            description: newItem.description ? newItem.description.trim() : "",
+        };
+
+        try {
+            const result = await updateCategory(editingItem._id, payload);
+            if (result && result.success) {
+                setEditingItem(null);
+                setNewItem({ category: "", description: "" });
+                setIsModalOpen(false);
+                // Refresh ang data
+                if (fetchCategories) {
+                    await fetchCategories(CurrentPage, 10, debouncedSearchTerm);
+                }
+                // Show success message
+                showStatusMessage("success", null, {
+                    title: "Category Updated",
+                    message: `"${payload.category}" has been successfully updated.`,
+                });
+            } else {
+                // Show error message kung hindi success
+                showStatusMessage("error", result?.error || "Failed to update category", {
+                    title: "Update Failed",
+                    onRetry: handleSaveEdit, // Optional: allow retry
+                });
+                // Pwede ring i-set ang form error kung gusto mo
+                setFormError(result?.error || "Failed to update category");
+            }
+        } catch (err) {
+            console.error("Update category failed:", err);
+            setFormError("Failed to update category");
+            showStatusMessage("error", err.message, {
+                title: "Update Error",
+                onRetry: handleSaveEdit,
+            });
+        }
+    };
 
     const handleDeleteClick = (id) => {
         setItemToDelete(id);
@@ -297,9 +295,7 @@ const handleSaveEdit = async () => {
         const csvContent = [
             headers.join(","),
             ...categories.map((item) =>
-                [item._id || item.id || "", `"${item.category || item.categoryName || ""}"`, `"${item.description || ""}"`].join(
-                    ",",
-                ),
+                [item._id || item.id || "", `"${item.category || item.categoryName || ""}"`, `"${item.description || ""}"`].join(","),
             ),
         ].join("\n");
 
@@ -381,9 +377,11 @@ const handleSaveEdit = async () => {
                 </div>
 
                 {/* Loading State */}
-                {(loading || isSearching) && <div className="mb-6 text-center text-slate-600 dark:text-slate-400">
-                    {isSearching ? "Searching..." : "Loading categories..."}
-                </div>}
+                {(loading || isSearching) && (
+                    <div className="mb-6 text-center text-slate-600 dark:text-slate-400">
+                        {isSearching ? "Searching..." : "Loading categories..."}
+                    </div>
+                )}
 
                 {/* Error State */}
                 {error && <div className="mb-6 rounded-lg bg-red-100 p-4 text-red-700 dark:bg-red-900/30 dark:text-red-400">Error: {error}</div>}

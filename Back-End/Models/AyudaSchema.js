@@ -1,6 +1,6 @@
 const mongoose = require("mongoose");
 
-const HistorySchema = new mongoose.Schema(
+const AyudaSchema = new mongoose.Schema(
   {
     assistanceId: {
       type: mongoose.Schema.Types.ObjectId,
@@ -16,7 +16,7 @@ const HistorySchema = new mongoose.Schema(
     status: {
       type: String,
       enum: ["Pending", "Released"],
-      default: "Released",
+      default: "Pending",
     },
 
     beneficiaryModel: {
@@ -28,4 +28,4 @@ const HistorySchema = new mongoose.Schema(
   { timestamps: true },
 );
 
-module.exports = mongoose.model("HistoryDistribution", HistorySchema);
+module.exports = mongoose.model("Ayuda", AyudaSchema);

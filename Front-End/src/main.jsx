@@ -16,35 +16,37 @@ import { RFIDRegisterProvider } from "./contexts/RegisterRfidContext/RegisterRfi
 import { DashboardProvider } from "./contexts/DashboardContext/SummaryDashboardContext.jsx";
 import AxiosInterceptor from "./components/AxiosInterceptor.jsx";
 import { SuperAdminDisplayProvider } from "./contexts/SuperAdminContext/SuperAdminContext.jsx";
+import { AyudaProvider } from "./contexts/AyudaContext/AyudaContext.jsx";
 
 createRoot(document.getElementById("root")).render(
-    <StrictMode>
         <AuthProvider>
             <AxiosInterceptor />
-            <SuperAdminDisplayProvider>
-                <DashboardProvider>
-                    <RFIDRegisterProvider>
-                        <NotificationDisplayProvider>
-                            <CategoryProvider>
-                                <OfficerDisplayProvider>
-                                    <HistoryProvider>
-                                        <AssistanceProvider>
-                                            <RFIDProvider>
-                                                <ResidentProvider>
-                                                    <AdminDisplayProvider>
-                                                        <SocketListener />
-                                                        <App />
-                                                    </AdminDisplayProvider>
-                                                </ResidentProvider>
-                                            </RFIDProvider>
-                                        </AssistanceProvider>
-                                    </HistoryProvider>
-                                </OfficerDisplayProvider>
-                            </CategoryProvider>
-                        </NotificationDisplayProvider>
-                    </RFIDRegisterProvider>
-                </DashboardProvider>
-            </SuperAdminDisplayProvider>
+            <AyudaProvider>
+                <SuperAdminDisplayProvider>
+                    <DashboardProvider>
+                        <RFIDRegisterProvider>
+                            <NotificationDisplayProvider>
+                                <CategoryProvider>
+                                    <OfficerDisplayProvider>
+                                        <HistoryProvider>
+                                            <AssistanceProvider>
+                                                <RFIDProvider>
+                                                    <ResidentProvider>
+                                                        <AdminDisplayProvider>
+                                                            <SocketListener />
+                                                            <App />
+                                                        </AdminDisplayProvider>
+                                                    </ResidentProvider>
+                                                </RFIDProvider>
+                                            </AssistanceProvider>
+                                        </HistoryProvider>
+                                    </OfficerDisplayProvider>
+                                </CategoryProvider>
+                            </NotificationDisplayProvider>
+                        </RFIDRegisterProvider>
+                    </DashboardProvider>
+                </SuperAdminDisplayProvider>
+            </AyudaProvider>
         </AuthProvider>
-    </StrictMode>,
+   
 );

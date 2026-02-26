@@ -8,6 +8,7 @@ export const useResident = () => useContext(ResidentContext);
 
 export const ResidentProvider = ({ children }) => {
     const { authToken, linkId } = useContext(AuthContext);
+    const [BarangayInMunicipality, setBarangayInMunicipality] = useState([]);
     const [residents, setResidents] = useState([]);
     const [isLoading, setIsLoading] = useState(false);
     const [TotalResidents, setTotalResidents] = useState(0);
@@ -15,6 +16,12 @@ export const ResidentProvider = ({ children }) => {
     const [CurrentPage, setCurrentPage] = useState(0);
     const [barangays, setBarangays] = useState([]);
     const [specificResident, setSpecificResident] = useState([]);
+    const [TotalItems, setTotalItems] = useState(0);
+    const [CurrentPageResident, setCurrentPageResident] = useState([]);
+    const [TotalPagesResident, setTotalPagesResident] = useState([]);
+    const [householdinbarangay, sethouseholdinbarangay] = useState([]);
+    const [household, sethousehold] = useState([]);
+    const [ContinueResidents, setContinueResidents] = useState([]);
     const [pagination, setPagination] = useState({
         totalResidents: 0,
         totalPages: 0,
@@ -68,6 +75,150 @@ export const ResidentProvider = ({ children }) => {
         }
     };
 
+    const DisplayContinueSelectResidents = async (assistanceId, page = 1, limit = 50, searchTerm = "", municipality = "", barangay = "") => {
+        if (!authToken) return;
+
+        try {
+            setIsLoading(true);
+
+            const params = {
+                page,
+                limit,
+            };
+            if (searchTerm?.trim()) params.search = searchTerm.trim();
+            if (municipality?.trim()) params.municipality = municipality.trim();
+            if (barangay?.trim()) params.barangay = barangay.trim();
+
+            const res = await axios.get(
+                `${import.meta.env.VITE_REACT_APP_BACKEND_BASEURL}/api/v1/Resident/DisplayContinueSelectResidents/${assistanceId}`,
+                {
+                    params,
+                    withCredentials: true,
+                    headers: {
+                        Authorization: `Bearer ${authToken}`,
+                        "Cache-Control": "no-cache",
+                    },
+                },
+            );
+
+            const { data, totalPages, currentPage, totalResidents } = res.data;
+
+            // Update state
+            setContinueResidents(data || []);
+            setTotalResidents(totalResidents || 0);
+            setTotalPages(totalPages || 1);
+            setCurrentPage(currentPage || page);
+        } catch (error) {
+            console.error("Error fetching residents:", error);
+            const errorMsg = error.response?.data?.message || "Failed to fetch residents";
+        } finally {
+            setIsLoading(false);
+        }
+    };
+
+    const fetchbyMunicipality = useCallback(
+        async (paramsObj) => {
+            console.log("1. Function Entered. Received:", paramsObj);
+
+            const { municipality } = paramsObj;
+            if (!municipality) return console.error("Missing municipality name!");
+            if (!authToken) return console.error("No Token!");
+
+            try {
+                setIsLoading(true);
+                console.log("2. Sending request to backend...");
+
+                const res = await axios.get(`${import.meta.env.VITE_REACT_APP_BACKEND_BASEURL}/api/v1/Resident/barangay-names/${municipality}`, {
+                    params: { page: 1, limit: 10 },
+                    withCredentials: true,
+                    headers: { Authorization: `Bearer ${authToken}` },
+                });
+
+                console.log("3. Backend Replied:", res.data);
+                setBarangayInMunicipality(res.data);
+            } catch (err) {
+                console.error("4. Axios Error Details:", err.response || err.message);
+            } finally {
+                setIsLoading(false);
+            }
+        },
+        [authToken],
+    );
+
+    const fetchbybarangayandhousehold = useCallback(
+        async ({ search, municipality, barangay, householdId, page = 1, limit = 10 }) => {
+            if (!municipality) return console.error("Missing municipality name!");
+            if (!authToken) return console.error("No Token!");
+
+            try {
+                setIsLoading(true);
+
+                const res = await axios.get(
+                    `${import.meta.env.VITE_REACT_APP_BACKEND_BASEURL}/api/v1/Resident/display-by-municipality/${municipality}`,
+                    {
+                        params: {
+                            ...(search && { search }),
+                            ...(barangay && { barangay }),
+                            ...(householdId && { householdId }),
+                            page,
+                            limit,
+                        },
+                        withCredentials: true,
+                        headers: { Authorization: `Bearer ${authToken}` },
+                    },
+                );
+
+                console.log("Backend Replied:", res.data);
+
+                sethouseholdinbarangay(res.data.data);
+                setTotalItems(res.data.totalItems);
+                setCurrentPageResident(res.data.currentPage);
+                setTotalPagesResident(res.data.totalPages);
+            } catch (err) {
+                console.error("Axios Error:", err.response?.data || err.message);
+            } finally {
+                setIsLoading(false);
+            }
+        },
+        [authToken],
+    );
+
+    const GetHouseholdFullDetails = useCallback(
+        async (paramsObj) => {
+            console.log("1. Function Entered. Received:", paramsObj);
+
+            // I-extract ang mga kailangang values mula sa paramsObj
+            const { householdId } = paramsObj;
+
+            if (!householdId) return console.error("Missing householdId!");
+            if (!authToken) return console.error("No Token!");
+
+            try {
+                setIsLoading(true);
+                console.log("2. Sending request to backend...");
+
+                const res = await axios.get(
+                    `${import.meta.env.VITE_REACT_APP_BACKEND_BASEURL}/api/v1/Resident/GetHouseholdFullDetails/${householdId}`,
+                    {
+                        withCredentials: true,
+                        headers: { Authorization: `Bearer ${authToken}` },
+                    },
+                );
+
+                console.log("3. Backend Replied:", res.data);
+
+                // Depende sa structure ng state mo, siguraduhin na tamang state ang ina-update
+                // Kung listahan ng tao ito, baka "setResidents" ang dapat gamitin
+                sethousehold(res.data);
+            } catch (err) {
+                console.error("4. Axios Error Details:", err.response?.data || err.message);
+            } finally {
+                setIsLoading(false);
+            }
+        },
+        [authToken], // Siguraduhin na kasama ang authToken dito
+    );
+
     const fetchBarangays = useCallback(
         async (municipality = "") => {
             console.log("Tumatama", fetchBarangays);
@@ -119,9 +270,7 @@ export const ResidentProvider = ({ children }) => {
     // Other CRUD functions (optimized versions)
     const createResident = useCallback(
         async (formData) => {
-
-
-            console.log("formData",formData)
+            console.log("formData", formData);
             if (!authToken) return { success: false, error: "No authentication token" };
 
             try {
@@ -418,6 +567,18 @@ export const ResidentProvider = ({ children }) => {
             excelInsertedCount,
             excelSkippedRows,
             uploadResidentsExcel,
+            BarangayInMunicipality,
+            fetchbyMunicipality,
+            householdinbarangay,
+            fetchbybarangayandhousehold,
+            household,
+            GetHouseholdFullDetails,
+            TotalItems,
+            CurrentPageResident,
+            TotalPagesResident,
+            sethouseholdinbarangay,
+            DisplayContinueSelectResidents,
+            ContinueResidents,
         }),
         [
             residents,
@@ -441,6 +602,18 @@ export const ResidentProvider = ({ children }) => {
             excelInsertedCount,
             excelSkippedRows,
             uploadResidentsExcel,
+            BarangayInMunicipality,
+            fetchbyMunicipality,
+            householdinbarangay,
+            fetchbybarangayandhousehold,
+            household,
+            GetHouseholdFullDetails,
+            TotalItems,
+            CurrentPageResident,
+            TotalPagesResident,
+            sethouseholdinbarangay,
+            DisplayContinueSelectResidents,
+            ContinueResidents,
         ],
     );
 

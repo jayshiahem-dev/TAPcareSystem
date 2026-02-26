@@ -6,94 +6,81 @@ const RfidActive = require("../Models/RFIDActiveSchema");
 
 exports.DashboardSummary = AsyncErrorHandler(async (req, res) => {
   try {
-    const [residentCount, beneficiaryCount] = await Promise.all([
-      Resident.countDocuments(),
-      Beneficiary.countDocuments(),
-    ]);
-    const totalPeople = residentCount + beneficiaryCount;
     const now = new Date();
     const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
     const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0);
     const startOfLastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
     const endOfLastMonth = new Date(now.getFullYear(), now.getMonth(), 0);
 
-    const [currentMonthAssign, lastMonthAssign] = await Promise.all([
-      AssistanceAssign.countDocuments({
-        created_at: { $gte: startOfMonth, $lte: now },
-      }),
-      AssistanceAssign.countDocuments({
-        created_at: { $gte: startOfLastMonth, $lte: endOfLastMonth },
-      }),
-    ]);
-
-    let assistancePercentage = 0;
-    if (lastMonthAssign > 0) {
-      assistancePercentage =
-        ((currentMonthAssign - lastMonthAssign) / lastMonthAssign) * 100;
-    } else if (currentMonthAssign > 0) {
-      assistancePercentage = 100;
-    }
-
-    const [totalRFID, assignedRFID] = await Promise.all([
+    // ✅ Parallel counts for residents, beneficiaries, RFID
+    const [
+      residentCount,
+      beneficiaryCount,
+      currentMonthAssign,
+      lastMonthAssign,
+      totalRFID,
+      assignedRFID,
+    ] = await Promise.all([
+      Resident.countDocuments(),
+      Beneficiary.countDocuments(),
+      AssistanceAssign.countDocuments({ created_at: { $gte: startOfMonth, $lte: now } }),
+      AssistanceAssign.countDocuments({ created_at: { $gte: startOfLastMonth, $lte: endOfLastMonth } }),
       RfidActive.countDocuments(),
       RfidActive.countDocuments({ status: "Assigned" }),
     ]);
 
-    const rfidAssignedPercentage =
-      totalRFID > 0 ? (assignedRFID / totalRFID) * 100 : 0;
+    const totalPeople = residentCount + beneficiaryCount;
+    const assistancePercentage =
+      lastMonthAssign > 0
+        ? ((currentMonthAssign - lastMonthAssign) / lastMonthAssign) * 100
+        : currentMonthAssign > 0
+        ? 100
+        : 0;
 
-    const [residents, beneficiaries] = await Promise.all([
-      Resident.find().select("municipality household_id"),
-      Beneficiary.find().select("municipality household_id"),
+    const rfidAssignedPercentage = totalRFID > 0 ? (assignedRFID / totalRFID) * 100 : 0;
+
+    // ✅ Aggregate for municipality counts instead of fetching all documents
+    const muniPipeline = [
+      {
+        $project: {
+          municipality: { $ifNull: ["$municipality", "Unknown"] },
+          household_id: 1,
+        },
+      },
+      { $group: { _id: "$household_id", municipality: { $first: "$municipality" } } }, // unique households
+      { $group: { _id: "$municipality", count: { $sum: 1 } } },
+    ];
+
+    const [residentMuni, beneficiaryMuni] = await Promise.all([
+      Resident.aggregate(muniPipeline),
+      Beneficiary.aggregate(muniPipeline),
     ]);
 
-    const combined = [...residents, ...beneficiaries];
-    const muniCounts = {};
-    const countedHouseholds = new Set();
+    const muniCountsMap = {};
 
-    combined.forEach((person) => {
-      const householdId = person.household_id?.toString();
-      if (!householdId) return;
-      if (!countedHouseholds.has(householdId)) {
-        const muni = person.municipality || "Unknown";
-        muniCounts[muni] = (muniCounts[muni] || 0) + 1;
-        countedHouseholds.add(householdId);
-      }
+    [...residentMuni, ...beneficiaryMuni].forEach((r) => {
+      muniCountsMap[r._id] = (muniCountsMap[r._id] || 0) + r.count;
     });
 
-    const totalHouseholds = Object.values(muniCounts).reduce(
-      (sum, val) => sum + val,
-      0,
-    );
+    const totalHouseholds = Object.values(muniCountsMap).reduce((a, b) => a + b, 0);
+    const municipalityData = Object.entries(muniCountsMap).map(([municipality, count]) => ({
+      municipality,
+      count,
+      percentage: totalHouseholds ? ((count / totalHouseholds) * 100).toFixed(0) + "%" : "0%",
+    }));
 
-    const municipalityData = Object.entries(muniCounts).map(
-      ([municipality, count]) => ({
-        municipality,
-        count,
-        percentage:
-          totalHouseholds > 0
-            ? ((count / totalHouseholds) * 100).toFixed(0) + "%"
-            : "0%",
-      }),
-    );
-
+    // ✅ Assistance data aggregation optimized
     const { fromDate, toDate, status = "" } = req.query;
-    const match = {};
+    const match = { scheduleDate: { $gte: startOfMonth, $lte: endOfMonth } };
     if (fromDate || toDate) {
-      match.scheduleDate = {};
+      if (!match.scheduleDate) match.scheduleDate = {};
       if (fromDate) match.scheduleDate.$gte = new Date(fromDate);
       if (toDate) match.scheduleDate.$lte = new Date(toDate);
     }
     if (status) match.status = status;
 
     const assistanceData = await AssistanceAssign.aggregate([
-      {
-        $match: {
-          scheduleDate: { $gte: startOfMonth, $lte: endOfMonth },
-          ...match,
-        },
-      },
-
+      { $match: match },
       {
         $lookup: {
           from: "categories",
@@ -108,51 +95,43 @@ exports.DashboardSummary = AsyncErrorHandler(async (req, res) => {
           from: "residents",
           localField: "residentIds",
           foreignField: "_id",
-          as: "resident",
+          as: "residents",
         },
       },
-      { $unwind: { path: "$resident", preserveNullAndEmptyArrays: true } },
       {
         $lookup: {
           from: "beneficiaries",
           localField: "residentIds",
           foreignField: "_id",
-          as: "beneficiary",
+          as: "beneficiaries",
         },
       },
-      { $unwind: { path: "$beneficiary", preserveNullAndEmptyArrays: true } },
-
       {
         $project: {
           _id: 1,
           category: "$category.categoryName",
           municipality: {
-            $ifNull: ["$resident.municipality", "$beneficiary.municipality"],
+            $ifNull: [
+              { $arrayElemAt: ["$residents.municipality", 0] },
+              { $arrayElemAt: ["$beneficiaries.municipality", 0] },
+            ],
           },
           scheduleDate: 1,
         },
       },
-
       {
         $group: {
-          _id: {
-            category: "$category",
-            municipality: "$municipality",
-            releaseDate: "$scheduleDate",
-          },
+          _id: { category: "$category", municipality: "$municipality", releaseDate: "$scheduleDate" },
           count: { $sum: 1 },
         },
       },
       {
         $group: {
           _id: { category: "$_id.category", municipality: "$_id.municipality" },
-          releaseDates: {
-            $push: { date: "$_id.releaseDate", count: "$count" },
-          },
+          releaseDates: { $push: { date: "$_id.releaseDate", count: "$count" } },
           totalCount: { $sum: "$count" },
         },
       },
-
       {
         $project: {
           _id: 0,

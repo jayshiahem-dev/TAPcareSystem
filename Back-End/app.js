@@ -16,8 +16,8 @@ const AssignAssistance = require("./Routes/AssignRoutes");
 const Category = require("./Routes/Category");
 const History = require("./Routes/HistoryRoute");
 const Rfid = require("./Routes/RFIDRegisterRoute");
-const SuperAdmin= require("./Routes/SuperAdminRoute");
-
+const SuperAdmin = require("./Routes/SuperAdminRoute");
+const Ayuda = require("./Routes/AyudaRoute");
 const Logs = require("./Routes/LogsRoute");
 
 const authentic = require("./Routes/authRouter");
@@ -25,7 +25,7 @@ const authentic = require("./Routes/authRouter");
 const Analytics = require("./Routes/AnalyticsRoute");
 
 const Officer = require("./Routes/OfficerRoute");
-const DownloadAgent= require("./Routes/DownloadRoute");
+const DownloadAgent = require("./Routes/DownloadRoute");
 
 let app = express();
 
@@ -44,7 +44,7 @@ app.use(
     saveUninitialized: false,
     store: MongoStore.create({
       mongoUrl: process.env.CONN_STR,
-      ttl: 12 * 60 * 60, 
+      ttl: 12 * 60 * 60,
     }),
     cookie: {
       secure: process.env.NODE_ENV === "production",
@@ -69,7 +69,6 @@ if (process.env.NODE_ENV === "development") {
   app.use(morgan("dev"));
 }
 
-
 const uploadsDir = path.join(__dirname, "..", "uploads");
 
 app.use("/uploads", express.static(uploadsDir));
@@ -85,11 +84,8 @@ app.use("/api/v1/History", History);
 app.use("/api/v1/Rfid", Rfid);
 app.use("/api/v1/Analytics", Analytics);
 app.use("/api/v1/SuperAdmin", SuperAdmin);
+app.use("/api/v1/Ayuda", Ayuda);
 app.use("/api/v1/DownloadAgent", DownloadAgent);
-
-
-
-
 
 app.use(ErrorController);
 

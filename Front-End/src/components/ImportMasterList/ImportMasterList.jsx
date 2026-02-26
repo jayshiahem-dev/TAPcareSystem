@@ -1,9 +1,9 @@
 import React, { useState, useRef, useEffect, useContext, useCallback, useMemo, Suspense } from "react";
-import { Database, Plus, UploadCloud } from "lucide-react";
 import { ResidentContext } from "../../contexts/ResidentContext/ResidentContext";
 import StatusModal from "../../ReusableFolder/SuccessandField";
 import { CategoryContext } from "../../contexts/CategoryContext/categoryContext";
-
+import { Database, Plus, UploadCloud, Save } from "lucide-react";
+import { AssistanceContext } from "../../contexts/AssignContext/AssignContext";
 // Lazy load modals
 const MainTable = React.lazy(() => import("./Modal/MainTable"));
 const ResidentModal = React.lazy(() => import("./Modal/AddResidentModal"));
@@ -12,7 +12,9 @@ const ResidentInfoModal = React.lazy(() => import("./Modal/ResidentInfoModal"));
 const RFIDModal = React.lazy(() => import("./Modal/RFIDModal"));
 const CardModal = React.lazy(() => import("./Modal/CardModal"));
 
-const ImportMasterList = () => {
+const ImportMasterList = ({ LatestAssistances }) => {
+    const { updateStatusCreated } = useContext(AssistanceContext);
+    
     const {
         residents,
         pagination,
@@ -31,8 +33,9 @@ const ImportMasterList = () => {
     } = useContext(ResidentContext);
 
     const { categories } = useContext(CategoryContext);
-    
-    // Refs
+
+    const benificiariyLimit = LatestAssistances?.beneficiaryLimit;
+
     const fetchTimeoutRef = useRef(null);
     const searchDebounceTimeoutRef = useRef(null);
     const isInitialMountRef = useRef(true);
@@ -40,16 +43,19 @@ const ImportMasterList = () => {
     const hasInitialDataRef = useRef(false);
     const initialFetchDoneRef = useRef(false);
     const fileInputRef = useRef(null);
-    
-    // Pagination refs
+
+    // State para sa pag-change ng page (para sa loading indicator)
+    const [isChangingPage, setIsChangingPage] = useState(false);
+
+    // Pagination refs (hindi ginagamit sa render)
     const paginationRef = useRef({
         currentPage: CurrentPage || 1,
         totalPages: TotalPages || 1,
         itemsPerPage: 10,
-        isChangingPage: false,
+        // isChangingPage ay inalis sa ref at ginawang state
         lastPageChangeTime: 0,
         pendingPageChange: null,
-        shouldResetToPage1: false
+        shouldResetToPage1: false,
     });
 
     // userRef for preventing multiple operations
@@ -93,14 +99,14 @@ const ImportMasterList = () => {
         printOrientation: "portrait",
         theme: "light",
 
-        // Form - UPDATED PARA SA BENEFICIARY SCHEMA (INALIS ANG TYPE FIELD)
+        // Form
         newResident: {
             household_id: "",
             firstname: "",
             lastname: "",
             middlename: "",
             suffix: "None",
-            relationship: "", // UPDATED: from role to relationship
+            relationship: "",
             gender: "Male",
             religion: "",
             civil_status: "Single",
@@ -120,7 +126,7 @@ const ImportMasterList = () => {
             course: "",
             school: "",
             rfid: null,
-            status: "Active"
+            status: "Active",
         },
 
         statusModalProps: {
@@ -141,21 +147,115 @@ const ImportMasterList = () => {
         },
     });
 
+    // === SELECTION STATE (IDs based) ===
+    const [selectedIds, setSelectedIds] = useState(() => {
+        const saved = localStorage.getItem("selectedResidentIds");
+        return saved ? new Set(JSON.parse(saved)) : new Set();
+    });
+
+    // Compute whether selection limit has been reached
+    const selectionLimitReached = useMemo(() => {
+        // If there's no beneficiary limit, treat as no limit (false)
+        return benificiariyLimit != null ? selectedIds.size >= benificiariyLimit : false;
+    }, [benificiariyLimit, selectedIds.size]);
+
+    // Save to localStorage whenever selectedIds changes
+    useEffect(() => {
+        localStorage.setItem("selectedResidentIds", JSON.stringify([...selectedIds]));
+    }, [selectedIds]);
+
+    // ========== MODIFIED: Toggle selection with limit check ==========
+    const toggleSelect = useCallback(
+        (residentId) => {
+            setSelectedIds((prev) => {
+                const newSet = new Set(prev);
+                if (newSet.has(residentId)) {
+                    // Always allow deselecting
+                    newSet.delete(residentId);
+                } else {
+                    // Only add if limit is not reached
+                    // Use benificiariyLimit directly from closure, but it may be undefined
+                    if (benificiariyLimit != null && prev.size >= benificiariyLimit) {
+                        // Limit reached, do nothing
+                        return prev;
+                    }
+                    newSet.add(residentId);
+                }
+                return newSet;
+            });
+        },
+        [benificiariyLimit],
+    ); // Add dependency
+
+    // ========== MODIFIED: Select all with limit check ==========
+    const selectAllOnPage = useCallback(() => {
+        if (!residents || residents.length === 0) return;
+        setSelectedIds((prev) => {
+            // If limit is defined, we need to ensure we don't exceed it
+            if (benificiariyLimit != null) {
+                const availableSlots = benificiariyLimit - prev.size;
+                if (availableSlots <= 0) return prev; // No slots left
+
+                // Collect IDs that are not already selected, up to availableSlots
+                const idsToAdd = [];
+                for (const resident of residents) {
+                    if (resident._id && !prev.has(resident._id)) {
+                        idsToAdd.push(resident._id);
+                        if (idsToAdd.length >= availableSlots) break;
+                    }
+                }
+                // Add them to the set
+                const newSet = new Set(prev);
+                idsToAdd.forEach((id) => newSet.add(id));
+                return newSet;
+            } else {
+                // No limit, add all
+                const newSet = new Set(prev);
+                residents.forEach((resident) => {
+                    if (resident._id) newSet.add(resident._id);
+                });
+                return newSet;
+            }
+        });
+    }, [residents, benificiariyLimit]);
+
+    // Deselect all residents on the current page (no limit check needed)
+    const deselectAllOnPage = useCallback(() => {
+        if (!residents || residents.length === 0) return;
+        setSelectedIds((prev) => {
+            const newSet = new Set(prev);
+            residents.forEach((resident) => {
+                if (resident._id) newSet.delete(resident._id);
+            });
+            return newSet;
+        });
+    }, [residents]);
+
     const updateState = useCallback((updates) => {
         setState((prev) => ({ ...prev, ...updates }));
     }, []);
 
-    // Update pagination ref when context changes
+    // Update pagination ref kapag nagbago ang context (hindi nagre-render)
     useEffect(() => {
         paginationRef.current = {
             ...paginationRef.current,
             currentPage: CurrentPage || 1,
             totalPages: TotalPages || 1,
-            itemsPerPage: state.itemsPerPage
+            itemsPerPage: state.itemsPerPage,
         };
     }, [CurrentPage, TotalPages, state.itemsPerPage]);
 
-    // Constants - UPDATED: Removed roleOptions, added relationshipOptions at inalis ang typeOptions
+    // Reset isChangingPage kapag tapos na ang fetch
+    useEffect(() => {
+        if (!isLoading && isChangingPage) {
+            const timer = setTimeout(() => {
+                setIsChangingPage(false);
+            }, 100); // maliit na delay para maiwasan ang flicker
+            return () => clearTimeout(timer);
+        }
+    }, [isLoading, isChangingPage]);
+
+    // Constants
     const municipalityOptions = useMemo(() => ["All", "Naval", "Cabucgayan", "Caibiran", "Kawayan", "Almeria", "Culaba", "Maripipi", "Biliran"], []);
     const genderOptions = useMemo(() => ["Male", "Female"], []);
     const civilStatusOptions = useMemo(() => ["Single", "Married", "Widowed", "Separated"], []);
@@ -300,12 +400,12 @@ const ImportMasterList = () => {
 
             fetchTimeoutRef.current = setTimeout(async () => {
                 let page = params.page;
-                
+
                 if (page === undefined && paginationRef.current.shouldResetToPage1) {
                     page = 1;
                     paginationRef.current.shouldResetToPage1 = false;
                 }
-                
+
                 page = page ?? paginationRef.current.currentPage ?? 1;
                 const limit = params.limit ?? paginationRef.current.itemsPerPage ?? state.itemsPerPage;
                 const search = params.search?.trim() ?? state.searchTerm?.trim() ?? "";
@@ -331,7 +431,7 @@ const ImportMasterList = () => {
                 paginationRef.current = {
                     ...paginationRef.current,
                     currentPage: page,
-                    itemsPerPage: limit
+                    itemsPerPage: limit,
                 };
 
                 try {
@@ -366,15 +466,15 @@ const ImportMasterList = () => {
     // File validation helper
     const validateAndSetFile = useCallback(
         (file) => {
-            const validExtensions = ['.xlsx', '.xls', '.csv'];
-            const fileExtension = '.' + file.name.split('.').pop().toLowerCase();
-            
+            const validExtensions = [".xlsx", ".xls", ".csv"];
+            const fileExtension = "." + file.name.split(".").pop().toLowerCase();
+
             if (file && validExtensions.includes(fileExtension)) {
-                updateState({ 
-                    file, 
-                    uploadStatus: "idle"
+                updateState({
+                    file,
+                    uploadStatus: "idle",
                 });
-                
+
                 showStatusMessage("success", null, {
                     title: "File Selected",
                     message: `${file.name} is ready for upload.`,
@@ -405,9 +505,9 @@ const ImportMasterList = () => {
         const operationKey = `upload_${Date.now()}`;
         userRef.current.isProcessing = true;
         userRef.current.pendingOperations.add(operationKey);
-        updateState({ 
+        updateState({
             uploadStatus: "uploading",
-            modalLoading: { ...state.modalLoading, upload: true }
+            modalLoading: { ...state.modalLoading, upload: true },
         });
 
         try {
@@ -426,15 +526,15 @@ const ImportMasterList = () => {
                         showUploadModal: false,
                         file: null,
                         uploadStatus: "idle",
-                        modalLoading: { ...state.modalLoading, upload: false }
+                        modalLoading: { ...state.modalLoading, upload: false },
                     });
 
                     handleFetchData({ page: paginationRef.current.currentPage || 1 });
                 }, 1500);
             } else {
-                updateState({ 
+                updateState({
                     uploadStatus: "error",
-                    modalLoading: { ...state.modalLoading, upload: false }
+                    modalLoading: { ...state.modalLoading, upload: false },
                 });
 
                 showStatusMessage("error", null, {
@@ -444,9 +544,9 @@ const ImportMasterList = () => {
             }
         } catch (err) {
             console.error("Upload error:", err);
-            updateState({ 
+            updateState({
                 uploadStatus: "error",
-                modalLoading: { ...state.modalLoading, upload: false }
+                modalLoading: { ...state.modalLoading, upload: false },
             });
 
             showStatusMessage("error", null, {
@@ -486,35 +586,37 @@ const ImportMasterList = () => {
         [updateState, validateAndSetFile],
     );
 
-    const handleFileChange = useCallback((e) => {
-        const files = e.target.files;
-        if (files && files.length > 0) {
-            validateAndSetFile(files[0]);
-        }
-    }, [validateAndSetFile]);
+    const handleFileChange = useCallback(
+        (e) => {
+            const files = e.target.files;
+            if (files && files.length > 0) {
+                validateAndSetFile(files[0]);
+            }
+        },
+        [validateAndSetFile],
+    );
 
-    // Form validation helper - UPDATED: Inalis ang validation para sa type field
+    // Form validation helper
     const validateResidentForm = useCallback(() => {
         const errors = [];
         const resident = state.newResident;
 
-        // REQUIRED FIELDS (INALIS ANG TYPE)
         if (!resident.household_id || resident.household_id.trim() === "") {
             errors.push("Household ID is required");
         }
-        
+
         if (!resident.firstname || resident.firstname.trim() === "") {
             errors.push("First name is required");
         }
-        
+
         if (!resident.lastname || resident.lastname.trim() === "") {
             errors.push("Last name is required");
         }
-        
+
         if (!resident.relationship || resident.relationship.trim() === "") {
             errors.push("Relationship to Head is required");
         }
-        
+
         if (!resident.gender || resident.gender.trim() === "") {
             errors.push("Gender is required");
         }
@@ -529,15 +631,14 @@ const ImportMasterList = () => {
         return true;
     }, [state.newResident, showStatusMessage]);
 
-    // Handle relationship change (INALIS ANG handleTypeChange)
     const handleRelationshipChange = useCallback((value) => {
-        setState(prev => ({
+        setState((prev) => ({
             ...prev,
-            newResident: { ...prev.newResident, relationship: value }
+            newResident: { ...prev.newResident, relationship: value },
         }));
     }, []);
 
-    // Add resident handler - UPDATED: Inalis ang type field
+    // Add resident handler
     const handleAddResident = useCallback(async () => {
         if (userRef.current.isProcessing) {
             console.log("Another operation is in progress, skipping add resident");
@@ -549,7 +650,6 @@ const ImportMasterList = () => {
         userRef.current.pendingOperations.add(operationKey);
         updateState({ modalLoading: { ...state.modalLoading, addResident: true } });
 
-        // Validate form
         if (!validateResidentForm()) {
             userRef.current.isProcessing = false;
             userRef.current.pendingOperations.delete(operationKey);
@@ -557,16 +657,15 @@ const ImportMasterList = () => {
             return;
         }
 
-        // Format birth_date to ISO string
         const formatBirthDate = (dateString) => {
             if (!dateString) return "";
             try {
-                if (dateString.includes('T')) {
+                if (dateString.includes("T")) {
                     return dateString;
                 }
                 const date = new Date(dateString);
                 if (isNaN(date.getTime())) {
-                    const parts = dateString.split('-');
+                    const parts = dateString.split("-");
                     if (parts.length === 3) {
                         const year = parseInt(parts[0]);
                         const month = parseInt(parts[1]) - 1;
@@ -584,7 +683,6 @@ const ImportMasterList = () => {
             }
         };
 
-        // Create resident data with all fields (INALIS ANG TYPE FIELD)
         const newResidentData = {
             household_id: state.newResident.household_id.trim(),
             firstname: state.newResident.firstname.trim(),
@@ -604,8 +702,6 @@ const ImportMasterList = () => {
             school: state.newResident.school ? state.newResident.school.trim() : "",
             rfid: null,
             status: "Active",
-            
-            // Optional fields
             civil_status: state.newResident.civil_status || "Single",
             employment_status: state.newResident.employment_status || "",
             classifications: state.newResident.classifications || [],
@@ -613,7 +709,7 @@ const ImportMasterList = () => {
             barangay: state.newResident.barangay ? state.newResident.barangay.trim() : "",
             sitio: state.newResident.sitio ? state.newResident.sitio.trim() : "",
             municipality: state.newResident.municipality ? state.newResident.municipality.trim() : "",
-            occupation: state.newResident.occupation ? state.newResident.occupation.trim() : ""
+            occupation: state.newResident.occupation ? state.newResident.occupation.trim() : "",
         };
 
         console.log("Submitting resident data:", newResidentData);
@@ -621,14 +717,13 @@ const ImportMasterList = () => {
         try {
             const result = await createResident(newResidentData);
             if (result.success) {
-                const fullName = `${state.newResident.firstname} ${state.newResident.middlename ? state.newResident.middlename + ' ' : ''}${state.newResident.lastname}`;
-                
+                const fullName = `${state.newResident.firstname} ${state.newResident.middlename ? state.newResident.middlename + " " : ""}${state.newResident.lastname}`;
+
                 showStatusMessage("success", null, {
                     title: "Resident Added",
                     message: `${fullName} has been successfully added.`,
                 });
-                
-                // Reset form (INALIS ANG TYPE FIELD)
+
                 updateState({
                     newResident: {
                         household_id: "",
@@ -656,11 +751,11 @@ const ImportMasterList = () => {
                         course: "",
                         school: "",
                         rfid: null,
-                        status: "Active"
+                        status: "Active",
                     },
                     showAddResidentModal: false,
                 });
-                
+
                 handleFetchData({ page: paginationRef.current.currentPage || 1 });
             } else {
                 showStatusMessage("failed", result.message || "Failed to add resident. Please try again.", {
@@ -698,8 +793,8 @@ const ImportMasterList = () => {
             try {
                 const result = await updateResident(updatedResident._id, updatedResident);
                 if (result.success) {
-                    const fullName = `${updatedResident.firstname} ${updatedResident.middlename ? updatedResident.middlename + ' ' : ''}${updatedResident.lastname}`;
-                    
+                    const fullName = `${updatedResident.firstname} ${updatedResident.middlename ? updatedResident.middlename + " " : ""}${updatedResident.lastname}`;
+
                     showStatusMessage("success", null, {
                         title: "Resident Updated",
                         message: `${fullName} has been successfully updated.`,
@@ -780,17 +875,17 @@ const ImportMasterList = () => {
     const handleSearchChange = useCallback(
         (value) => {
             updateState({ searchTerm: value });
-            
+
             if (searchDebounceTimeoutRef.current) {
                 clearTimeout(searchDebounceTimeoutRef.current);
             }
-            
+
             searchDebounceTimeoutRef.current = setTimeout(() => {
                 if (value.trim() !== state.searchTerm.trim()) {
                     paginationRef.current.shouldResetToPage1 = true;
                 }
-                handleFetchData({ 
-                    search: value.trim() !== "" ? value : undefined
+                handleFetchData({
+                    search: value.trim() !== "" ? value : undefined,
                 });
             }, 500);
         },
@@ -828,7 +923,7 @@ const ImportMasterList = () => {
             }
 
             paginationRef.current.shouldResetToPage1 = true;
-            
+
             handleFetchData({
                 municipality: value !== "All" ? value : undefined,
                 barangay: undefined,
@@ -836,6 +931,12 @@ const ImportMasterList = () => {
         },
         [handleFetchData, updateState, fetchBarangays],
     );
+
+    const handdledone = useCallback(() => {
+        updateStatusCreated(LatestAssistances._id);
+        setSelectedIds(new Set()); // Clear all selected IDs
+        console.log("Done Trigger");
+    }, [updateStatusCreated, LatestAssistances]);
 
     // Barangay change handler
     const handleBarangayChange = useCallback(
@@ -853,7 +954,8 @@ const ImportMasterList = () => {
     const handlePageChange = useCallback(
         (page) => {
             const now = Date.now();
-            if (paginationRef.current.isChangingPage && (now - paginationRef.current.lastPageChangeTime < 300)) {
+            // Gamitin ang isChangingPage state sa halip na ref
+            if (isChangingPage && now - paginationRef.current.lastPageChangeTime < 300) {
                 console.log("Page change too fast, skipping");
                 return;
             }
@@ -868,17 +970,19 @@ const ImportMasterList = () => {
                 return;
             }
 
+            // I-set ang state para mag-render ang loading
+            setIsChangingPage(true);
+
             paginationRef.current = {
                 ...paginationRef.current,
-                isChangingPage: true,
                 lastPageChangeTime: now,
                 pendingPageChange: page,
-                shouldResetToPage1: false
+                shouldResetToPage1: false,
             };
 
             handleFetchData({ page });
         },
-        [handleFetchData],
+        [handleFetchData, isChangingPage],
     );
 
     // Items per page change handler
@@ -886,13 +990,13 @@ const ImportMasterList = () => {
         (value) => {
             const newLimit = parseInt(value);
             updateState({ itemsPerPage: newLimit });
-            
+
             paginationRef.current = {
                 ...paginationRef.current,
                 itemsPerPage: newLimit,
-                shouldResetToPage1: true
+                shouldResetToPage1: true,
             };
-            
+
             handleFetchData({ limit: newLimit });
         },
         [handleFetchData, updateState],
@@ -917,19 +1021,6 @@ const ImportMasterList = () => {
         paginationRef.current.shouldResetToPage1 = true;
         handleFetchData({ barangay: undefined });
     }, [handleFetchData, updateState]);
-
-    // Reset pagination loading state after fetch completes
-    useEffect(() => {
-        if (!isLoading && paginationRef.current.isChangingPage) {
-            setTimeout(() => {
-                paginationRef.current = {
-                    ...paginationRef.current,
-                    isChangingPage: false,
-                    pendingPageChange: null
-                };
-            }, 100);
-        }
-    }, [isLoading]);
 
     // View resident info handler
     const handleViewResidentInfo = useCallback(
@@ -992,8 +1083,8 @@ const ImportMasterList = () => {
         try {
             const result = await updateResidentRFID(state.rfidNumber, state.selectedResident._id);
             if (result.success) {
-                const fullName = `${state.selectedResident.firstname} ${state.selectedResident.middlename ? state.selectedResident.middlename + ' ' : ''}${state.selectedResident.lastname}`;
-                
+                const fullName = `${state.selectedResident.firstname} ${state.selectedResident.middlename ? state.selectedResident.middlename + " " : ""}${state.selectedResident.lastname}`;
+
                 showStatusMessage("success", null, {
                     title: "RFID Assigned Successfully",
                     message: `RFID ${state.rfidNumber} has been assigned to ${fullName}`,
@@ -1202,9 +1293,27 @@ const ImportMasterList = () => {
                             <Database className="text-orange-600 dark:text-orange-400" />
                             Municipal MasterList Management
                         </h1>
+                        {LatestAssistances?.assistanceName && (
+                            <p className="mt-1 text-sm font-medium text-orange-600 dark:text-orange-400">
+                                Program: {LatestAssistances.assistanceName}
+                            </p>
+                        )}
                         <p className="mt-1 text-gray-500 dark:text-gray-400">Manage the municipality's resident list.</p>
+                        {selectedIds.size > 0 && (
+                            <p className="mt-1 text-sm text-blue-600 dark:text-blue-400">
+                                {selectedIds.size}/{benificiariyLimit} resident(s) selected
+                            </p>
+                        )}
                     </div>
                     <div className="flex items-center gap-3">
+                        {selectedIds.size > 0 && (
+                            <button
+                                onClick={handdledone}
+                                className="flex items-center gap-2 rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-100 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-800"
+                            >
+                                <Save size={18} /> Done
+                            </button>
+                        )}
                         <button
                             onClick={() => updateState({ showAddResidentModal: true })}
                             className="flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 font-medium text-white transition-colors hover:bg-blue-700 dark:bg-blue-700 dark:hover:bg-blue-600"
@@ -1236,6 +1345,7 @@ const ImportMasterList = () => {
                 >
                     <MainTable
                         data={residents}
+                        LatestAssistances={LatestAssistances}
                         searchTerm={state.searchTerm}
                         setSearchTerm={handleSearchChange}
                         selectedMunicipality={state.selectedMunicipality}
@@ -1246,7 +1356,7 @@ const ImportMasterList = () => {
                         municipalityOptions={municipalityOptions}
                         itemsPerPage={state.itemsPerPage}
                         setItemsPerPage={handleItemsPerPageChange}
-                        currentPage={paginationRef.current.currentPage}
+                        currentPage={CurrentPage || 1}
                         setCurrentPage={handlePageChange}
                         theme={state.theme}
                         onViewResident={handleViewResidentInfo}
@@ -1255,14 +1365,21 @@ const ImportMasterList = () => {
                         pagination={{
                             totalResidents: TotalResidents || 0,
                             totalPages: TotalPages || 1,
-                            currentPage: paginationRef.current.currentPage,
+                            currentPage: CurrentPage || 1,
                         }}
                         onFetchData={handleFetchData}
-                        isLoading={isLoading || paginationRef.current.isChangingPage}
+                        isLoading={isLoading || isChangingPage}
                         onClearSearch={handleClearSearch}
                         onClearMunicipality={handleClearMunicipality}
                         onClearBarangay={handleClearBarangay}
                         categories={categories}
+                        // Selection props
+                        selectedIds={selectedIds}
+                        onToggleSelect={toggleSelect}
+                        onSelectAll={selectAllOnPage}
+                        onDeselectAll={deselectAllOnPage}
+                        // Pass limit reached flag for UI disabling
+                        selectionLimitReached={selectionLimitReached}
                     />
                 </Suspense>
             </div>
@@ -1292,11 +1409,13 @@ const ImportMasterList = () => {
                 {state.showUploadModal && (
                     <UploadModal
                         show={state.showUploadModal}
-                        onClose={() => updateState({ 
-                            showUploadModal: false,
-                            file: null,
-                            uploadStatus: "idle"
-                        })}
+                        onClose={() =>
+                            updateState({
+                                showUploadModal: false,
+                                file: null,
+                                uploadStatus: "idle",
+                            })
+                        }
                         file={state.file}
                         isDragging={state.isDragging}
                         uploadStatus={state.uploadStatus}
@@ -1336,11 +1455,11 @@ const ImportMasterList = () => {
                     <RFIDModal
                         show={state.rfidAssignModal}
                         onClose={() => {
-                            updateState({ 
-                                rfidAssignModal: false, 
-                                selectedResident: null, 
+                            updateState({
+                                rfidAssignModal: false,
+                                selectedResident: null,
                                 rfidNumber: "",
-                                modalLoading: { ...state.modalLoading, rfid: false }
+                                modalLoading: { ...state.modalLoading, rfid: false },
                             });
                         }}
                         resident={state.selectedResident}

@@ -18,6 +18,7 @@ export const AssistanceProvider = ({ children }) => {
     const [AllCurrentPage, setAllCurrentPage] = useState(1);
     const [releasedHistory, setReleasedHistory] = useState([]);
     const [SpecificResidentData, setSpecificResidentData] = useState([]);
+    const [LatestAssistances, setLatestAssistances] = useState([]);
 
     // Pagination state
     const [pagination, setPagination] = useState({
@@ -78,10 +79,30 @@ export const AssistanceProvider = ({ children }) => {
         [authToken, backendURL],
     );
 
+    const fetchLatestAssistance = useCallback(async () => {
+        if (!authToken) return;
+
+        try {
+            setIsLoading(true);
+            const res = await axios.get(`${backendURL}/api/v1/Assistance/GetLatestAssistance`, {
+                withCredentials: true,
+                headers: { Authorization: `Bearer ${authToken}`, "Cache-Control": "no-cache" },
+            });
+
+            const { data } = res.data;
+
+            setLatestAssistances(data || []);
+        } catch (error) {
+            console.error("Error fetching assistances:", error);
+            const errorMsg = error.response?.data?.message || "Failed to fetch assistances";
+        } finally {
+            setIsLoading(false);
+        }
+    }, [authToken, backendURL]);
+
     const getResidentByRFID = useCallback(
         async (rfid) => {
             if (!authToken) return;
-
 
             setIsLoading(true);
             try {
@@ -96,12 +117,10 @@ export const AssistanceProvider = ({ children }) => {
                     console.log("Resident + Assistance:", res.data.data);
                     return { success: true, data: res.data.data };
                 } else {
-                    setResidentData(null);
                     return { success: false };
                 }
             } catch (error) {
                 console.error("Error fetching resident by RFID:", error);
-                setResidentData(null);
                 return { success: false };
             } finally {
                 setIsLoading(false);
@@ -189,17 +208,23 @@ export const AssistanceProvider = ({ children }) => {
     );
 
     const releaseEarliestAssistance = useCallback(
-        async (rfid) => {
-            console.log("rfid", rfid);
+        async (rfid, assistanceId, userId) => {
             if (!authToken) return { success: false, error: "No auth token" };
             if (!rfid) return { success: false, error: "RFID is required" };
 
             setIsLoading(true);
             try {
-                const res = await axios.post(`${backendURL}/api/v1/Assistance/RfidID/${rfid}`, {
-                    withCredentials: true,
-                    headers: { Authorization: `Bearer ${authToken}` },
-                });
+                const res = await axios.post(
+                    `${backendURL}/api/v1/Assistance/RfidID`,
+                    {
+                        assistanceId, // isama sa body
+                        userId, // isama sa body
+                    },
+                    {
+                        withCredentials: true,
+                        headers: { Authorization: `Bearer ${authToken}` },
+                    },
+                );
 
                 if (res.data.success) {
                     const historyRecord = res.data.data;
@@ -359,6 +384,34 @@ export const AssistanceProvider = ({ children }) => {
         [authToken, backendURL],
     );
 
+    // ================= UPDATE ASSISTANCE =================
+    const updateStatusCreated = useCallback(
+        async (id, data) => {
+            if (!authToken) return { success: false, error: "No authentication token" };
+
+            setIsLoading(true);
+            try {
+                const res = await axios.patch(`${backendURL}/api/v1/Assistance/updateStatusCreated/${id}`, data, {
+                    withCredentials: true,
+                    headers: { Authorization: `Bearer ${authToken}`, "Content-Type": "application/json" },
+                });
+
+                if (res.data.success) {
+                    return { success: true };
+                } else {
+                    const errorMsg = res.data.message || "Update failed";
+                    return { success: false, error: errorMsg };
+                }
+            } catch (error) {
+                const errorMsg = error.response?.data?.message || "Update failed";
+                return { success: false, error: errorMsg };
+            } finally {
+                setIsLoading(false);
+            }
+        },
+        [authToken, backendURL],
+    );
+
     useEffect(() => {
         if (!authToken) return;
 
@@ -369,6 +422,7 @@ export const AssistanceProvider = ({ children }) => {
         fetchTimeoutRef.current = setTimeout(() => {
             fetchAssistances(1, 10);
             fetchAllAssistances(1, 10);
+            fetchLatestAssistance();
             hasInitialFetchRef.current = true;
             prevAuthTokenRef.current = authToken;
         }, 100);
@@ -402,6 +456,9 @@ export const AssistanceProvider = ({ children }) => {
             SpecificResidentData,
             getResidentByRFID,
             generateAssistanceReport,
+            fetchLatestAssistance,
+            LatestAssistances,
+            updateStatusCreated,
         }),
 
         [
@@ -427,6 +484,9 @@ export const AssistanceProvider = ({ children }) => {
             SpecificResidentData,
             getResidentByRFID,
             generateAssistanceReport,
+            fetchLatestAssistance,
+            LatestAssistances,
+            updateStatusCreated,
         ],
     );
 

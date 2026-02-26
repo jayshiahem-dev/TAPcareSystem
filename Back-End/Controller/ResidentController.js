@@ -2,10 +2,229 @@ const AsyncErrorHandler = require("../Utils/AsyncErrorHandler");
 const Resident = require("../Models/ResidentSchema");
 const ExcelJS = require("exceljs");
 const { Readable } = require("stream");
-
+const mongoose = require("mongoose");
 const RfidActive = require("../Models/RFIDActiveSchema");
 
 const Beneficiary = require("../Models/BenificiarySchema");
+const AyudaSchema = require("../Models/AyudaSchema");
+
+exports.DisplayContinueSelectResidents = AsyncErrorHandler(async (req, res) => {
+  try {
+    const {
+      search = "",
+      municipality = "",
+      barangay = "",
+      page = 1,
+    } = req.query;
+    const limit = 50;
+    const { assistanceId } = req.params;
+
+    const currentPage = Math.max(parseInt(page), 1);
+    const perPage = Math.max(parseInt(limit), 1);
+
+    let excludedResidentIds = [];
+    let excludedBeneficiaryIds = [];
+
+    // 1️⃣ Get existing Ayuda records
+    if (assistanceId && mongoose.Types.ObjectId.isValid(assistanceId)) {
+      const existingAyuda = await AyudaSchema.find({ assistanceId }).select("beneficiaryId beneficiaryModel").lean();
+
+      existingAyuda.forEach((a) => {
+        if (a.beneficiaryModel === "Resident") excludedResidentIds.push(a.beneficiaryId);
+        if (a.beneficiaryModel === "Beneficiary") excludedBeneficiaryIds.push(a.beneficiaryId);
+      });
+    }
+
+    // 2️⃣ Build filters
+    const residentMatch = {
+      _id: { $nin: excludedResidentIds },
+    };
+
+    if (search) {
+      const words = search.trim().split(/\s+/);
+      residentMatch.$and = words.map((w) => ({
+        $or: [
+          { firstname: { $regex: w, $options: "i" } },
+          { middlename: { $regex: w, $options: "i" } },
+          { lastname: { $regex: w, $options: "i" } },
+          { rfid: { $regex: w, $options: "i" } },
+        ],
+      }));
+    }
+
+    if (municipality) residentMatch.municipality = { $regex: municipality.trim(), $options: "i" };
+    if (barangay) residentMatch.barangay = { $regex: barangay.trim(), $options: "i" };
+
+    // 3️⃣ Aggregation to join Residents + Beneficiaries
+    const flatList = await Resident.aggregate([
+      { $match: residentMatch },
+      { $sort: { createdAt: -1 } },
+      { $limit: 100 }, // limit early
+      {
+        $lookup: {
+          from: "beneficiaries",
+          let: { householdId: "$household_id" },
+          pipeline: [
+            { $match: { $expr: { $eq: ["$household_id", "$$householdId"] } } },
+            { $match: { _id: { $nin: excludedBeneficiaryIds.map(id => mongoose.Types.ObjectId(id)) } } },
+          ],
+          as: "beneficiaries",
+        },
+      },
+      {
+        $project: {
+          type: { $literal: "resident" },
+          firstname: 1,
+          middlename: 1,
+          lastname: 1,
+          rfid: 1,
+          municipality: 1,
+          barangay: 1,
+          household_id: 1,
+          createdAt: 1,
+          beneficiaries: 1,
+        },
+      },
+    ]);
+
+    // 4️⃣ Flatten the list in memory (much smaller array than fetching all beneficiaries first)
+    let finalList = [];
+    flatList.forEach((r) => {
+      finalList.push({ type: "resident", ...r, beneficiaries: undefined }); // remove nested array
+
+      r.beneficiaries.forEach((b) => {
+        finalList.push({
+          type: "beneficiary",
+          ...b,
+          municipality: r.municipality,
+          barangay: r.barangay,
+        });
+      });
+    });
+
+    const totalItems = finalList.length;
+    const totalPages = Math.ceil(totalItems / perPage) || 1;
+    const start = (currentPage - 1) * perPage;
+    const end = start + perPage;
+
+    res.status(200).json({
+      status: "success",
+      totalItems,
+      currentPage,
+      totalPages,
+      limit: perPage,
+      data: finalList.slice(start, end),
+    });
+  } catch (error) {
+    console.error("Error fetching Residents + Beneficiaries:", error);
+    res.status(500).json({
+      status: "error",
+      message: "Failed to fetch data",
+      error: error.message,
+    });
+  }
+});
+
+exports.DisplayResidents = AsyncErrorHandler(async (req, res) => {
+  try {
+    const {
+      search = "",
+      municipality = "",
+      barangay = "",
+      page = 1,
+      limit = 10,
+    } = req.query;
+
+    const currentPage = Math.max(parseInt(page), 1);
+    const perPage = Math.max(parseInt(limit), 1);
+
+    const residentMatch = {};
+
+    if (search) {
+      const cleanSearch = search.trim();
+      const words = cleanSearch.split(/\s+/);
+
+      residentMatch.$and = words.map((w) => ({
+        $or: [
+          { firstname: { $regex: w, $options: "i" } },
+          { middlename: { $regex: w, $options: "i" } },
+          { lastname: { $regex: w, $options: "i" } },
+          { rfid: { $regex: w, $options: "i" } },
+        ],
+      }));
+    }
+
+    if (municipality) {
+      residentMatch.municipality = {
+        $regex: municipality.trim(),
+        $options: "i",
+      };
+    }
+
+    if (barangay) {
+      residentMatch.barangay = { $regex: barangay.trim(), $options: "i" };
+    }
+
+    const residents = await Resident.find(residentMatch)
+      .sort({ createdAt: -1 })
+      .skip(0)
+      .limit(100)
+      .lean();
+
+    const householdIds = residents.map((r) => r.household_id);
+
+    const beneficiaries = await Beneficiary.find({
+      household_id: { $in: householdIds },
+    }).lean();
+
+    let flatList = [];
+    residents.forEach((r) => {
+      flatList.push({ type: "resident", ...r });
+
+      const matchedBeneficiaries = beneficiaries
+        .filter((b) => b.household_id === r.household_id)
+        .map((b) => ({
+          type: "beneficiary",
+          ...b,
+          municipality: r.municipality,
+          barangay: r.barangay,
+        }));
+
+      flatList.push(...matchedBeneficiaries);
+    });
+
+    flatList.sort((a, b) => {
+      const aTime = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+      const bTime = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+      return bTime - aTime;
+    });
+
+    const totalItems = flatList.length;
+    const totalPages = Math.ceil(totalItems / perPage) || 1;
+    const start = (currentPage - 1) * perPage;
+    const end = start + perPage;
+    const paginatedData = flatList.slice(start, end);
+
+    res.status(200).json({
+      status: "success",
+      totalItems,
+      currentPage,
+      totalPages,
+      limit: perPage,
+      data: paginatedData,
+    });
+  } catch (error) {
+    console.error(
+      "Error fetching Residents + Beneficiaries (flat paginated):",
+      error,
+    );
+    res.status(500).json({
+      status: "error",
+      message: "Failed to fetch data",
+      error: error.message,
+    });
+  }
+});
 
 exports.CreateResident = AsyncErrorHandler(async (req, res) => {
   try {
@@ -23,18 +242,14 @@ exports.CreateResident = AsyncErrorHandler(async (req, res) => {
     const existingHousehold = await Resident.findOne({ household_id });
 
     if (existingHousehold) {
-
       data = await Beneficiary.create(payload);
     } else {
-   
       data = await Resident.create(payload);
     }
 
     res.status(201).json({
       success: true,
-      message: existingHousehold
-        ? "Saved as Beneficiary"
-        : "Saved as Resident",
+      message: existingHousehold ? "Saved as Beneficiary" : "Saved as Resident",
       data,
     });
   } catch (error) {
@@ -46,7 +261,6 @@ exports.CreateResident = AsyncErrorHandler(async (req, res) => {
     });
   }
 });
-
 
 exports.UpdateResidentRFID = async (req, res) => {
   try {
@@ -127,106 +341,6 @@ exports.UpdateResidentRFID = async (req, res) => {
   }
 };
 
-exports.DisplayResidents = AsyncErrorHandler(async (req, res) => {
-  try {
-    const {
-      search = "",
-      municipality = "",
-      barangay = "",
-      page = 1,
-      limit = 10,
-    } = req.query;
-
-    const currentPage = Math.max(parseInt(page), 1);
-    const perPage = Math.max(parseInt(limit), 1);
-
-    const residentMatch = {};
-
-    if (search) {
-      const cleanSearch = search.trim();
-      const words = cleanSearch.split(/\s+/);
-
-      residentMatch.$and = words.map((w) => ({
-        $or: [
-          { firstname: { $regex: w, $options: "i" } },
-          { middlename: { $regex: w, $options: "i" } },
-          { lastname: { $regex: w, $options: "i" } },
-          { rfid: { $regex: w, $options: "i" } },
-        ],
-      }));
-    }
-
-    if (municipality) {
-      residentMatch.municipality = {
-        $regex: municipality.trim(),
-        $options: "i",
-      };
-    }
-
-    if (barangay) {
-      residentMatch.barangay = { $regex: barangay.trim(), $options: "i" };
-    }
-
-    const residents = await Resident.find(residentMatch)
-      .sort({ createdAt: -1 })
-      .skip(0) 
-      .limit(100) 
-      .lean();
-
-    const householdIds = residents.map((r) => r.household_id);
-
-    const beneficiaries = await Beneficiary.find({
-      household_id: { $in: householdIds },
-    }).lean();
-
-    let flatList = [];
-    residents.forEach((r) => {
-      flatList.push({ type: "resident", ...r });
-
-      const matchedBeneficiaries = beneficiaries
-        .filter((b) => b.household_id === r.household_id)
-        .map((b) => ({
-          type: "beneficiary",
-          ...b,
-          municipality: r.municipality,
-          barangay: r.barangay,
-        }));
-
-      flatList.push(...matchedBeneficiaries);
-    });
-
-    flatList.sort((a, b) => {
-      const aTime = a.createdAt ? new Date(a.createdAt).getTime() : 0;
-      const bTime = b.createdAt ? new Date(b.createdAt).getTime() : 0;
-      return bTime - aTime;
-    });
-
-    const totalItems = flatList.length;
-    const totalPages = Math.ceil(totalItems / perPage) || 1;
-    const start = (currentPage - 1) * perPage;
-    const end = start + perPage;
-    const paginatedData = flatList.slice(start, end);
-
-    res.status(200).json({
-      status: "success",
-      totalItems,
-      currentPage,
-      totalPages,
-      limit: perPage,
-      data: paginatedData,
-    });
-  } catch (error) {
-    console.error(
-      "Error fetching Residents + Beneficiaries (flat paginated):",
-      error,
-    );
-    res.status(500).json({
-      status: "error",
-      message: "Failed to fetch data",
-      error: error.message,
-    });
-  }
-});
 exports.DisplayResidentById = AsyncErrorHandler(async (req, res) => {
   const residentId = req.params.id;
 
@@ -293,7 +407,6 @@ exports.DeleteResident = AsyncErrorHandler(async (req, res) => {
     deletedRecord = await Beneficiary.findByIdAndDelete(id);
     deletedFrom = "beneficiary";
   }
-
 
   if (!deletedRecord) {
     return res.status(404).json({
@@ -423,7 +536,7 @@ exports.UploadResidentsExcel = AsyncErrorHandler(async (req, res) => {
       });
     }
 
-    const worksheet = workbook.worksheets[0]; 
+    const worksheet = workbook.worksheets[0];
     const insertedResidents = [];
     const insertedBeneficiaries = [];
     const skippedRows = [];
@@ -438,7 +551,7 @@ exports.UploadResidentsExcel = AsyncErrorHandler(async (req, res) => {
     };
 
     worksheet.eachRow({ includeEmpty: false }, (row, rowNumber) => {
-      if (rowNumber === 1) return; 
+      if (rowNumber === 1) return;
 
       const rowData = {};
       row.values.slice(1).forEach((cell, idx) => {
@@ -619,6 +732,247 @@ exports.UploadResidentsExcel = AsyncErrorHandler(async (req, res) => {
     res.status(500).json({
       success: false,
       message: "Failed to upload residents/beneficiaries",
+      error: error.message,
+    });
+  }
+});
+
+exports.DisplayByMunicipality = AsyncErrorHandler(async (req, res) => {
+  try {
+    const {
+      search = "",
+      barangay = "",
+      householdId = "",
+      page = 1,
+      limit = 10,
+    } = req.query;
+
+    const { municipality } = req.params;
+
+    if (!municipality) {
+      return res.status(400).json({
+        status: "error",
+        message: "Municipality is required",
+      });
+    }
+
+    const currentPage = Math.max(parseInt(page), 1);
+    const perPage = Math.max(parseInt(limit), 1);
+
+    const matchConditions = {
+      municipality: { $regex: `^${municipality.trim()}$`, $options: "i" },
+    };
+
+    if (barangay) {
+      matchConditions.barangay = {
+        $regex: `^${barangay.trim()}$`,
+        $options: "i",
+      };
+    }
+
+    if (householdId) {
+      matchConditions.household_id = householdId.trim();
+    }
+
+    if (search) {
+      // Linisin ang search: tanggalin ang commas at extra spaces
+      const cleanSearch = search.replace(/,/g, " ").trim();
+      const words = cleanSearch.split(/\s+/).filter((word) => word.length > 0);
+
+      if (words.length > 0) {
+        // Gumamit ng $and para dapat mahanap ang bawat "salita" sa alinmang field
+        matchConditions.$and = words.map((word) => ({
+          $or: [
+            { firstname: { $regex: word, $options: "i" } },
+            { middlename: { $regex: word, $options: "i" } },
+            { lastname: { $regex: word, $options: "i" } },
+            { rfid: { $regex: word, $options: "i" } },
+            { household_id: { $regex: word, $options: "i" } },
+          ],
+        }));
+      }
+    }
+
+    const totalResidents = await Resident.countDocuments(matchConditions);
+
+    let aggregationPipeline = [
+      { $match: matchConditions },
+      { $sort: { createdAt: -1 } },
+      { $skip: (currentPage - 1) * perPage },
+      { $limit: perPage },
+    ];
+
+    if (householdId) {
+      aggregationPipeline.push(
+        {
+          $lookup: {
+            from: "beneficiaries",
+            localField: "household_id",
+            foreignField: "household_id",
+            as: "beneficiaryData",
+          },
+        },
+        {
+          $project: {
+            resident: {
+              type: "resident",
+              _id: "$_id",
+              householdId: "$household_id",
+              firstname: "$firstname",
+              middlename: "$middlename",
+              lastname: "$lastname",
+              municipality: "$municipality",
+              barangay: "$barangay",
+              rfid: "$rfid",
+              createdAt: "$createdAt",
+            },
+            beneficiaries: {
+              $map: {
+                input: "$beneficiaryData",
+                as: "b",
+                in: {
+                  type: "beneficiary",
+                  _id: "$$b._id",
+                  householdId: "$$b.household_id",
+                  name: "$$b.name",
+                  municipality: "$municipality",
+                  barangay: "$barangay",
+                  rfid: "$$b.rfid",
+                  createdAt: "$$b.createdAt",
+                },
+              },
+            },
+          },
+        },
+      );
+
+      const results = await Resident.aggregate(aggregationPipeline);
+
+      let flatList = [];
+      results.forEach((item) => {
+        if (item.resident) flatList.push(item.resident);
+        if (item.beneficiaries?.length) {
+          flatList.push(...item.beneficiaries);
+        }
+      });
+
+      return res.status(200).json({
+        status: "success",
+        totalItems: totalResidents,
+        currentPage,
+        totalPages: Math.ceil(totalResidents / perPage),
+        limit: perPage,
+        data: flatList,
+      });
+    }
+
+    aggregationPipeline.push({
+      $project: {
+        _id: 1,
+        type: { $literal: "resident" },
+        householdId: "$household_id",
+        firstname: 1,
+        middlename: 1,
+        lastname: 1,
+        suffix: 1,
+        gender: 1,
+        religion: 1,
+        civil_status: 1,
+        birth_date: 1,
+        birth_place: 1,
+        employment_status: 1,
+        sitio: 1,
+        classifications: 1,
+        contact_number: 1,
+        rfid: 1,
+        occupation: 1,
+        municipality: 1,
+        barangay: 1,
+        rfid: 1,
+        createdAt: 1,
+      },
+    });
+
+    const results = await Resident.aggregate(aggregationPipeline);
+
+    return res.status(200).json({
+      status: "success",
+      totalItems: totalResidents,
+      currentPage,
+      totalPages: Math.ceil(totalResidents / perPage),
+      limit: perPage,
+      data: results,
+    });
+  } catch (error) {
+    console.error("Error fetching data:", error);
+    res.status(500).json({
+      status: "error",
+      message: "Failed to fetch data",
+      error: error.message,
+    });
+  }
+});
+
+exports.GetBarangayNamesOnly = AsyncErrorHandler(async (req, res) => {
+  try {
+    const { municipality } = req.params;
+
+    if (!municipality) {
+      return res.status(400).json({
+        status: "error",
+        message: "Municipality is required",
+      });
+    }
+
+    // Get unique barangay names only
+    const barangayNames = await Resident.distinct("barangay", {
+      municipality: { $regex: `^${municipality.trim()}$`, $options: "i" },
+    });
+
+    // Optional: sort alphabetically
+    barangayNames.sort((a, b) => a.localeCompare(b));
+
+    res.status(200).json(barangayNames);
+  } catch (error) {
+    console.error("Error fetching barangays:", error);
+    res.status(500).json({
+      status: "error",
+      message: "Failed to fetch barangays",
+      error: error.message,
+    });
+  }
+});
+
+exports.GetHouseholdFullDetails = AsyncErrorHandler(async (req, res) => {
+  try {
+    const { householdId } = req.params;
+
+    if (!householdId) {
+      return res.status(400).json({
+        status: "error",
+        message: "householdId is required",
+      });
+    }
+
+    const residents = await Resident.find({
+      household_id: householdId.trim(),
+    }).lean();
+
+    const beneficiaries = await Beneficiary.find({
+      household_id: householdId.trim(),
+    }).lean();
+
+    res.status(200).json({
+      status: "success",
+      householdId,
+      residents,
+      beneficiaries,
+    });
+  } catch (error) {
+    console.error("Error fetching household data:", error);
+    res.status(500).json({
+      status: "error",
+      message: "Failed to fetch data",
       error: error.message,
     });
   }

@@ -52,7 +52,6 @@ const RightSideComponent = () => {
     useEffect(() => {
         if (categories && categories.length > 0) {
             console.log("Categories from context:", categories);
-            // Set category options
             const options = categories.map((cat) => ({
                 id: cat._id || cat.id,
                 name: cat.categoryName || cat.name || cat,
@@ -225,34 +224,12 @@ const RightSideComponent = () => {
         setLocalSelectedBarangay(selectedBarangay || "");
     }, [selectedBarangay]);
 
-    // Get category options for dropdown
+    // Get category options for dropdown (simplified – relies on context)
     const getCategoryOptions = () => {
-        // Use categories from context if available
         if (categoryOptions && categoryOptions.length > 0) {
-            const options = [{ id: "", name: "All Categories" }];
-            categoryOptions.forEach((cat) => {
-                if (cat.id && cat.name) {
-                    options.push({ id: cat.id, name: cat.name });
-                }
-            });
-            return options;
+            return [{ id: "", name: "All Categories" }, ...categoryOptions];
         }
-
-        // Fallback: extract unique categories from assistance data
-        const allCategories = [];
-        assistancesToday?.forEach((assistance) => {
-            if (assistance.categoryId && assistance.categoryName) {
-                allCategories.push({
-                    id: assistance.categoryId,
-                    name: assistance.categoryName,
-                });
-            }
-        });
-
-        // Remove duplicates
-        const uniqueCategories = Array.from(new Map(allCategories.map((cat) => [cat.id, cat])).values());
-
-        return [{ id: "", name: "All Categories" }, ...uniqueCategories];
+        return [{ id: "", name: "All Categories" }];
     };
 
     const handlePageChange = (page) => {
@@ -564,38 +541,46 @@ const RightSideComponent = () => {
                             </thead>
                             <tbody>
                                 {assistancesToday && assistancesToday.length > 0 ? (
-                                    assistancesToday.map((assistance) => (
+                                    assistancesToday.map((record) => (
                                         <tr
-                                            key={assistance._id}
+                                            key={record._id}
                                             className="border-t border-gray-100 transition-colors hover:bg-gray-50 dark:border-gray-700 dark:hover:bg-gray-700/50"
                                         >
+                                            {/* Date */}
                                             <td className="p-3 text-gray-600 dark:text-gray-400">
                                                 <div className="text-xs font-medium md:text-sm">
-                                                    {formatDate(assistance.distributionDate || assistance.scheduleDate)}
+                                                    {formatDate(record.assistance?.scheduleDate)}
                                                 </div>
                                                 <div className="text-xs text-gray-500 dark:text-gray-500">
-                                                    {assistance.scheduleDate && assistance.distributionDate !== assistance.scheduleDate
-                                                        ? `Sched: ${formatDate(assistance.scheduleDate)}`
+                                                    {record.createdAt && record.assistance?.scheduleDate && 
+                                                     record.createdAt !== record.assistance.scheduleDate
+                                                        ? `Created: ${formatDate(record.createdAt)}`
                                                         : ""}
                                                 </div>
                                             </td>
+
+                                            {/* Resident Name */}
                                             <td className="p-3">
                                                 <div className="text-sm font-medium text-gray-900 dark:text-white">
-                                                    {assistance.residentName || "N/A"}
+                                                    {record.beneficiaryName || "N/A"}
                                                 </div>
                                             </td>
+
+                                            {/* Location */}
                                             <td className="p-3">
                                                 <div className="flex flex-col gap-1">
                                                     <span className="inline-flex items-center gap-1 rounded bg-green-100 px-2 py-0.5 text-xs text-green-700 dark:bg-green-900/30 dark:text-green-400">
                                                         <Home size={10} />
-                                                        {assistance.barangay || "N/A"}
+                                                        {record.resident?.barangay || "N/A"}
                                                     </span>
                                                     <span className="inline-flex items-center gap-1 rounded bg-indigo-100 px-2 py-0.5 text-xs text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-400">
                                                         <MapPin size={10} />
-                                                        {assistance.municipality || "N/A"}
+                                                        {record.resident?.municipality || "N/A"}
                                                     </span>
                                                 </div>
                                             </td>
+
+                                            {/* Assistance Name (displayed as "Category") */}
                                             <td className="p-3">
                                                 <span
                                                     className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium ${
@@ -603,18 +588,22 @@ const RightSideComponent = () => {
                                                     }`}
                                                 >
                                                     <Package size={10} />
-                                                    <span className="max-w-[80px] truncate">{assistance.categoryName || "Unknown"}</span>
+                                                    <span className="max-w-[80px] truncate">{record.assistanceName || "Unknown"}</span>
                                                 </span>
                                             </td>
+
+                                            {/* Amount */}
                                             <td className="p-3">
                                                 <div className="text-sm font-semibold text-gray-900 dark:text-white">
-                                                    {formatCurrency(assistance.assistanceAmount || 0)}
+                                                    {formatCurrency(record.assistance?.totalAmount || 0)}
                                                 </div>
                                             </td>
+
+                                            {/* Items */}
                                             <td className="p-3">
-                                                {assistance.items && assistance.items.length > 0 ? (
+                                                {record.assistance?.items && record.assistance.items.length > 0 ? (
                                                     <div className="flex flex-col gap-1">
-                                                        {assistance.items.map((item, idx) => (
+                                                        {record.assistance.items.map((item, idx) => (
                                                             <span
                                                                 key={idx}
                                                                 className="text-xs text-gray-700 dark:text-gray-300"
@@ -627,24 +616,23 @@ const RightSideComponent = () => {
                                                     <span className="text-xs text-gray-400 dark:text-gray-500">No items</span>
                                                 )}
                                             </td>
+
+                                            {/* Status */}
                                             <td className="p-3">
                                                 <span
-                                                    className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-bold uppercase ${getReleaseStatusColor(assistance.distributionStatus)}`}
+                                                    className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-bold uppercase ${getReleaseStatusColor(record.status)}`}
                                                 >
-                                                    {getReleaseStatusIcon(assistance.distributionStatus)}
-                                                    {assistance.distributionStatus?.charAt(0).toUpperCase() +
-                                                        assistance.distributionStatus?.slice(1) || "Pending"}
+                                                    {getReleaseStatusIcon(record.status)}
+                                                    {record.status?.charAt(0).toUpperCase() + record.status?.slice(1) || "Pending"}
                                                 </span>
-                                                <div className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                                                    Priority: {assistance.statusSelection || "Pending"}
-                                                </div>
+                                                {/* Priority field not available in data – removed */}
                                             </td>
                                         </tr>
                                     ))
                                 ) : (
                                     <tr>
                                         <td
-                                            colSpan="6"
+                                            colSpan="7"
                                             className="p-6 text-center"
                                         >
                                             <div className="flex flex-col items-center justify-center">
@@ -669,8 +657,6 @@ const RightSideComponent = () => {
                 {!isLoading && (
                     <div className="flex flex-col items-center justify-between gap-3 border-t border-gray-200 p-3 dark:border-gray-700 md:flex-row">
                         <div className="flex items-center gap-3">
-                    
-
                             <div className="flex items-center gap-2">
                                 <span className="text-xs text-gray-500 dark:text-gray-400 md:text-sm">Show:</span>
                                 <select

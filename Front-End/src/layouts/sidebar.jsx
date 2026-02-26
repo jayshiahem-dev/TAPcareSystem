@@ -36,47 +36,50 @@ export const Sidebar = forwardRef(({ collapsed }, ref) => {
     );
 
     // Define role permissions
-    const rolePermissions = useMemo(() => ({
-        superadmin: [
-            "/dashboard",
-            "/dashboard/masterlist",
-            "/dashboard/priority-table",
-            "/dashboard/Beneficiarylist",
-            "/dashboard/history-table",
-            "/dashboard/new-category",
-            "/dashboard/rfid-table",
-            "/dashboard/rfid",
-            "/dashboard/settings",
-            "/dashboard/admin-table",
-            "/dashboard/officer-table",
-            "/dashboard/super-admin",
-            "/dashboard/analytics",
-        ],
-        admin: [
-            "/dashboard",
-            "/dashboard/masterlist",
-            "/dashboard/priority-table",
-            "/dashboard/Beneficiarylist",
-            "/dashboard/history-table",
-            "/dashboard/new-category",
-            "/dashboard/rfid",
-            "/dashboard/settings",
-            "/dashboard/admin-table",
-            "/dashboard/officer-table",
-            "/dashboard/analytics",
-        ],
-        staff: [
-            "/dashboard",
-            "/dashboard/masterlist",
-            "/dashboard/priority-table",
-            "/dashboard/Beneficiarylist",
-            "/dashboard/history-table",
-            "/dashboard/new-category",
-            "/dashboard/rfid",
-            "/dashboard/settings",
-            "/dashboard/analytics",
-        ],
-    }), []);
+    const rolePermissions = useMemo(
+        () => ({
+            superadmin: [
+                "/dashboard",
+                "/dashboard/masterlist",
+
+                "/dashboard/archived",
+                "/dashboard/new-category",
+                "/dashboard/rfid-table",
+                "/dashboard/rfid",
+                "/dashboard/settings",
+                "/dashboard/admin-table",
+                "/dashboard/officer-table",
+                "/dashboard/super-admin",
+                "/dashboard/analytics",
+                "/dashboard/municipalFiles",
+            ],
+            admin: [
+                "/dashboard",
+                "/dashboard/masterlist",
+                "/dashboard/analytics",
+
+                "/dashboard/archived",
+                "/dashboard/new-category",
+                "/dashboard/rfid",
+                "/dashboard/settings",
+                "/dashboard/admin-table",
+                "/dashboard/officer-table",
+                "/dashboard/municipalFiles",
+            ],
+            staff: [
+                "/dashboard",
+                "/dashboard/masterlist",
+                "/dashboard/priority-table",
+                "/dashboard/Beneficiarylist",
+                "/dashboard/history-table",
+                "/dashboard/new-category",
+                "/dashboard/rfid",
+                "/dashboard/settings",
+                "/dashboard/analytics",
+            ],
+        }),
+        [],
+    );
 
     // Get allowed paths for current role
     const allowedPaths = useMemo(() => {
@@ -90,22 +93,13 @@ export const Sidebar = forwardRef(({ collapsed }, ref) => {
 
     // Check if any sub-link is allowed for toggle buttons
     const isMasterListAllowed = useMemo(() => {
-        const masterListPaths = [
-            "/dashboard/masterlist",
-            "/dashboard/priority-table",
-            "/dashboard/Beneficiarylist",
-            "/dashboard/history-table",
-        ];
-        return masterListPaths.some(path => isPathAllowed(path));
+        const masterListPaths = ["/dashboard/masterlist", "/dashboard/priority-table", "/dashboard/Beneficiarylist", "/dashboard/history-table"];
+        return masterListPaths.some((path) => isPathAllowed(path));
     }, [allowedPaths]);
 
     const isUsersAllowed = useMemo(() => {
-        const userPaths = [
-            "/dashboard/admin-table",
-            "/dashboard/officer-table",
-            "/dashboard/undermaintenance",
-        ];
-        return userPaths.some(path => isPathAllowed(path));
+        const userPaths = ["/dashboard/admin-table", "/dashboard/officer-table", "/dashboard/undermaintenance"];
+        return userPaths.some((path) => isPathAllowed(path));
     }, [allowedPaths]);
 
     const toggleMasterList = () => {
@@ -124,7 +118,7 @@ export const Sidebar = forwardRef(({ collapsed }, ref) => {
 
     // Filter sub-sidebar links based on role permissions
     const getFilteredSubLinks = (links) => {
-        return links.filter(link => {
+        return links.filter((link) => {
             // Special case: Super Admin link ay para lang sa superadmin role
             if (link.to === "/dashboard/undermaintenance" || link.label === "Super Admin") {
                 return role === "superadmin";
@@ -184,7 +178,7 @@ export const Sidebar = forwardRef(({ collapsed }, ref) => {
                     <img
                         src={logo}
                         alt="Logo"
-                        className="h-12 w-12  object-contain"
+                        className="h-12 w-12 object-contain"
                     />
                     {!collapsed && (
                         <div>
@@ -209,9 +203,7 @@ export const Sidebar = forwardRef(({ collapsed }, ref) => {
                                 const isActive = (isMasterList && (openMasterList || isMasterListRoute)) || (isUsers && (openUsers || isUsersRoute));
 
                                 // Check if link should be visible based on role
-                                const shouldShowLink = isMasterList ? isMasterListAllowed : 
-                                                     isUsers ? isUsersAllowed : 
-                                                     isPathAllowed(link.path);
+                                const shouldShowLink = isMasterList ? isMasterListAllowed : isUsers ? isUsersAllowed : isPathAllowed(link.path);
 
                                 if (!shouldShowLink) return null;
 
@@ -226,7 +218,7 @@ export const Sidebar = forwardRef(({ collapsed }, ref) => {
                                                 !isActive && "text-gray-600 hover:bg-orange-50 dark:text-gray-400 dark:hover:bg-gray-800",
                                                 isActive && "bg-orange-500 text-white shadow-lg shadow-orange-200 dark:shadow-none",
                                                 collapsed && "w-[45px] justify-center px-0",
-                                                !shouldShowLink && "opacity-50 cursor-not-allowed"
+                                                !shouldShowLink && "cursor-not-allowed opacity-50",
                                             )}
                                         >
                                             <link.icon
@@ -262,7 +254,7 @@ export const Sidebar = forwardRef(({ collapsed }, ref) => {
                                                     ? "bg-orange-500 text-white shadow-lg shadow-orange-200"
                                                     : "text-gray-600 hover:bg-orange-50 dark:text-gray-400 dark:hover:bg-gray-800",
                                                 collapsed && "w-[45px] justify-center px-0",
-                                                !shouldShowLink && "opacity-50 cursor-not-allowed"
+                                                !shouldShowLink && "cursor-not-allowed opacity-50",
                                             )
                                         }
                                     >
@@ -293,10 +285,11 @@ export const Sidebar = forwardRef(({ collapsed }, ref) => {
                     open: openMasterList && isMasterListAllowed,
                     title: "Records",
                     links: getFilteredSubLinks([
-                        { to: "/dashboard/masterlist", label: "MasterList" },
+                        { to: "/dashboard/masterlist", label: "Assign Assistance" },
                         { to: "/dashboard/priority-table", label: "Selected Beneficiaries" },
                         { to: "/dashboard/Beneficiarylist", label: "Beneficiaries" },
-                        { to: "/dashboard/history-table", label: "History" },
+                        { to: "/dashboard/archived", label: "Archive Program" },
+                        { to: "/dashboard/municipalFiles", label: "Municipality Repository" },
                     ]),
                 },
                 {
@@ -308,41 +301,42 @@ export const Sidebar = forwardRef(({ collapsed }, ref) => {
                         { to: "/dashboard/super-admin", label: "Super Admin" },
                     ]),
                 },
-            ].map((sub, idx) => (
-                sub.links.length > 0 && (
-                    <aside
-                        key={idx}
-                        className={cn(
-                            "fixed top-0 z-[90] h-full w-[240px] border-r bg-white shadow-2xl transition-all duration-500 ease-in-out dark:bg-gray-900",
-                            sub.open ? "translate-x-0" : "-translate-x-full",
-                            collapsed ? "left-[70px]" : "left-[260px]",
-                        )}
-                    >
-                        <div className="p-6 pt-24">
-                            <p className="mb-6 text-[10px] font-black uppercase tracking-[0.2em] text-orange-500">{sub.title}</p>
-                            <div className="flex flex-col gap-y-2">
-                                {sub.links.map((sLink) => (
-                                    <NavLink
-                                        key={sLink.to}
-                                        to={sLink.to}
-                                        onClick={(e) => handleSoftLoad(e, sLink.to)}
-                                        className={({ isActive }) =>
-                                            cn(
-                                                "block rounded-lg px-4 py-3 text-sm font-medium transition-all",
-                                                isActive
-                                                    ? "border-l-4 border-orange-500 bg-orange-50 text-orange-600"
-                                                    : "text-gray-600 hover:bg-gray-50 dark:text-gray-400 dark:hover:bg-gray-800",
-                                            )
-                                        }
-                                    >
-                                        {sLink.label}
-                                    </NavLink>
-                                ))}
+            ].map(
+                (sub, idx) =>
+                    sub.links.length > 0 && (
+                        <aside
+                            key={idx}
+                            className={cn(
+                                "fixed top-0 z-[90] h-full w-[240px] border-r bg-white shadow-2xl transition-all duration-500 ease-in-out dark:bg-gray-900",
+                                sub.open ? "translate-x-0" : "-translate-x-full",
+                                collapsed ? "left-[70px]" : "left-[260px]",
+                            )}
+                        >
+                            <div className="p-6 pt-24">
+                                <p className="mb-6 text-[10px] font-black uppercase tracking-[0.2em] text-orange-500">{sub.title}</p>
+                                <div className="flex flex-col gap-y-2">
+                                    {sub.links.map((sLink) => (
+                                        <NavLink
+                                            key={sLink.to}
+                                            to={sLink.to}
+                                            onClick={(e) => handleSoftLoad(e, sLink.to)}
+                                            className={({ isActive }) =>
+                                                cn(
+                                                    "block rounded-lg px-4 py-3 text-sm font-medium transition-all",
+                                                    isActive
+                                                        ? "border-l-4 border-orange-500 bg-orange-50 text-orange-600"
+                                                        : "text-gray-600 hover:bg-gray-50 dark:text-gray-400 dark:hover:bg-gray-800",
+                                                )
+                                            }
+                                        >
+                                            {sLink.label}
+                                        </NavLink>
+                                    ))}
+                                </div>
                             </div>
-                        </div>
-                    </aside>
-                )
-            ))}
+                        </aside>
+                    ),
+            )}
         </>
     );
 });

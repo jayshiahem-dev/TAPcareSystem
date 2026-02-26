@@ -1,6 +1,6 @@
-import React, { useContext } from "react";
-import { Eye, Radio, Trash2 } from "lucide-react";
-import { AyudaContext } from "../../../contexts/AyudaContext/AyudaContext";
+import React, { useContext, useState, useCallback } from "react"; // Added useState and useCallback
+import { AyudaContext } from "../../contexts/AyudaContext/AyudaContext";
+import StatusModal from "../../ReusableFolder/SuccessandField";
 
 const MainTable = ({
     data,
@@ -17,14 +17,10 @@ const MainTable = ({
     currentPage,
     setCurrentPage,
     theme,
-    onViewResident,
-    onAssignRFID,
-    onDeleteResident,
+    SelectedSize,
+    beneficiaryLimit,
     pagination,
     isLoading,
-    onClearSearch,
-    onClearMunicipality,
-    onClearBarangay,
     selectedIds,
     onToggleSelect,
     onSelectAll,
@@ -32,33 +28,102 @@ const MainTable = ({
     LatestAssistances,
 }) => {
     const { assignAyuda } = useContext(AyudaContext);
+
+    // --- STATE PARA SA STATUS MODAL ---
+    const [state, setState] = useState({
+        showStatusModal: false,
+        statusModalProps: {
+            status: "success",
+            error: null,
+            title: "",
+            message: "",
+            onRetry: null,
+        },
+    });
+
+    const updateState = useCallback((newState) => {
+        setState((prev) => ({ ...prev, ...newState }));
+    }, []);
+
+    const handleStatusModalClose = () => {
+        updateState({ showStatusModal: false });
+    };
+
     const allSelected = data.length > 0 && data.every((item) => selectedIds.has(item._id));
     const someSelected = data.some((item) => selectedIds.has(item._id)) && !allSelected;
 
     const assistanceId = LatestAssistances?._id;
+    
+    // Status message helper
+    const showStatusMessage = useCallback(
+        (status, error = null, customProps = {}) => {
+            updateState({
+                showStatusModal: true,
+                statusModalProps: {
+                    status,
+                    error,
+                    title: customProps.title || (status === "success" ? "Success" : "Error"),
+                    message: customProps.message || "",
+                    onRetry: customProps.onRetry || null,
+                    isRFIDAssignment: customProps.isRFIDAssignment || false,
+                },
+            });
+        },
+        [updateState],
+    );
 
+    // --- LOGIC PARA SA BULK SELECT (CHECK ALL) ---
     const handleSelectAllChange = async () => {
-        if (!assistanceId) return alert("No active assistance found.");
+        if (!assistanceId) {
+            showStatusMessage("error", "No active assistance found.", { title: "Missing ID" });
+            return;
+        }
         const residentIds = data.map((item) => item._id);
+
         try {
-            await assignAyuda(assistanceId, residentIds);
             if (allSelected) {
                 onDeselectAll(assistanceId);
             } else {
+                const newlySelectedCount = data.filter((item) => !selectedIds.has(item._id)).length;
+
+                if (beneficiaryLimit && SelectedSize + newlySelectedCount > beneficiaryLimit) {
+                    showStatusMessage("error", null, { 
+                        title: "Limit Warning", 
+                        message: "Selecting all will exceed the beneficiary limit." 
+                    });
+                    return;
+                }
+
+                await assignAyuda(assistanceId, residentIds);
                 onSelectAll(assistanceId);
+                showStatusMessage("success", null, { message: "Bulk selection updated successfully." });
             }
         } catch (error) {
-            console.error("Error in bulk update:", error);
+            showStatusMessage("error", error.message);
         }
     };
 
+    // --- LOGIC PARA SA SINGLE ROW CHECK ---
     const handleRowCheckboxChange = async (residentId) => {
-        if (!assistanceId) return alert("No active assistance found.");
+        if (!assistanceId) {
+            showStatusMessage("error", "No active assistance found.");
+            return;
+        }
+
+        const isCurrentlySelected = selectedIds.has(residentId);
+
+        if (!isCurrentlySelected && beneficiaryLimit && SelectedSize >= beneficiaryLimit) {
+            showStatusMessage("error", null, { 
+                message: `Limit reached! You can only select up to ${beneficiaryLimit} beneficiaries.` 
+            });
+            return;
+        }
+
         try {
             await assignAyuda(assistanceId, [residentId]);
             onToggleSelect(residentId, assistanceId);
         } catch (error) {
-            console.error("Error updating resident assignment:", error);
+            showStatusMessage("error", error.message);
         }
     };
 
@@ -87,57 +152,47 @@ const MainTable = ({
 
     return (
         <div className="relative rounded-lg border border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-800">
-            {/* Filters and search */}
+            {/* Header Filters */}
             <div className="border-b border-gray-200 p-4 dark:border-gray-700">
-                <div className="flex flex-wrap items-center gap-4">
-                    {/* Items Per Page (Show) */}
-                    <div className="flex items-center gap-2">
-                        <span className="text-sm text-gray-600 dark:text-gray-400">Show:</span>
+                <div className="flex flex-wrap items-center justify-between gap-4">
+                    <div className="flex flex-wrap items-center gap-4">
+
+                        <div className="min-w-[200px] flex-1">
+                            <input
+                                type="text"
+                                placeholder="Search by name, household ID..."
+                                value={searchTerm}
+                                onChange={(e) => setSearchTerm(e.target.value)}
+                                disabled={isLoading}
+                                className="w-full rounded-lg border px-3 py-2 disabled:opacity-50 dark:border-gray-600 dark:bg-gray-700"
+                            />
+                        </div>
                         <select
-                            value={itemsPerPage}
-                            onChange={(e) => {
-                                setItemsPerPage(Number(e.target.value));
-                                setCurrentPage(1); // Reset to page 1 when limit changes
-                            }}
+                            value={selectedMunicipality}
+                            onChange={(e) => setSelectedMunicipality(e.target.value)}
                             disabled={isLoading}
-                            className="rounded-lg border px-2 py-2 text-sm disabled:opacity-50 dark:border-gray-600 dark:bg-gray-700"
+                            className="rounded-lg border px-3 py-2 disabled:opacity-50 dark:border-gray-600 dark:bg-gray-700"
                         >
-                            {[10, 25, 50, 100].map((num) => (
-                                <option key={num} value={num}>{num}</option>
+                            {municipalityOptions.map((mun) => (
+                                <option key={mun} value={mun}>{mun}</option>
+                            ))}
+                        </select>
+                        <select
+                            value={selectedBarangay}
+                            onChange={(e) => setSelectedBarangay(e.target.value)}
+                            disabled={isLoading || selectedMunicipality === "All"}
+                            className="rounded-lg border px-3 py-2 disabled:opacity-50 dark:border-gray-600 dark:bg-gray-700"
+                        >
+                            {filteredBarangays.map((bar) => (
+                                <option key={bar} value={bar}>{bar}</option>
                             ))}
                         </select>
                     </div>
 
-                    <div className="min-w-[200px] flex-1">
-                        <input
-                            type="text"
-                            placeholder="Search by name, household ID..."
-                            value={searchTerm}
-                            onChange={(e) => setSearchTerm(e.target.value)}
-                            disabled={isLoading}
-                            className="w-full rounded-lg border px-3 py-2 disabled:opacity-50 dark:border-gray-600 dark:bg-gray-700"
-                        />
+                    <div className="text-sm font-medium">
+                        Selected: <span className="text-orange-600">{SelectedSize}</span>
+                        {beneficiaryLimit && <span> / {beneficiaryLimit}</span>}
                     </div>
-                    <select
-                        value={selectedMunicipality}
-                        onChange={(e) => setSelectedMunicipality(e.target.value)}
-                        disabled={isLoading}
-                        className="rounded-lg border px-3 py-2 disabled:opacity-50 dark:border-gray-600 dark:bg-gray-700"
-                    >
-                        {municipalityOptions.map((mun) => (
-                            <option key={mun} value={mun}>{mun}</option>
-                        ))}
-                    </select>
-                    <select
-                        value={selectedBarangay}
-                        onChange={(e) => setSelectedBarangay(e.target.value)}
-                        disabled={isLoading || selectedMunicipality === "All"}
-                        className="rounded-lg border px-3 py-2 disabled:opacity-50 dark:border-gray-600 dark:bg-gray-700"
-                    >
-                        {filteredBarangays.map((bar) => (
-                            <option key={bar} value={bar}>{bar}</option>
-                        ))}
-                    </select>
                 </div>
             </div>
 
@@ -169,15 +224,11 @@ const MainTable = ({
                                 <th className="px-6 py-3">Household ID</th>
                                 <th className="px-6 py-3">Barangay</th>
                                 <th className="px-6 py-3">Status</th>
-                                <th className="px-6 py-3">Actions</th>
                             </tr>
                         </thead>
                         <tbody>
                             {data.map((resident) => (
-                                <tr
-                                    key={resident._id}
-                                    className="border-b hover:bg-gray-50 dark:border-gray-700 dark:hover:bg-gray-600"
-                                >
+                                <tr key={resident._id} className="border-b hover:bg-gray-50 dark:border-gray-700 dark:hover:bg-gray-600">
                                     <td className="px-6 py-4">
                                         <input
                                             type="checkbox"
@@ -196,26 +247,6 @@ const MainTable = ({
                                         <span className={`rounded-full px-2 py-1 text-xs ${getStatusColor(resident.status, theme)}`}>
                                             {resident.status}
                                         </span>
-                                    </td>
-                                    <td className="px-6 py-4">
-                                        <div className="flex items-center space-x-3">
-                                            <button onClick={() => onViewResident(resident)} className="text-blue-600 hover:text-blue-900 dark:text-blue-400">
-                                                <Eye size={18} />
-                                            </button>
-                                            <button onClick={() => onAssignRFID(resident)} className="text-green-600 hover:text-green-900 dark:text-green-400">
-                                                <Radio size={18} />
-                                            </button>
-                                            <button 
-                                                onClick={() => {
-                                                    if (window.confirm(`Delete ${resident.firstname}?`)) {
-                                                        onDeleteResident(resident._id, `${resident.firstname} ${resident.lastname}`);
-                                                    }
-                                                }}
-                                                className="text-red-600 hover:text-red-900 dark:text-red-400"
-                                            >
-                                                <Trash2 size={18} />
-                                            </button>
-                                        </div>
                                     </td>
                                 </tr>
                             ))}
@@ -259,6 +290,17 @@ const MainTable = ({
                     </div>
                 </div>
             )}
+
+            {/* --- FIXED STATUS MODAL --- */}
+            <StatusModal
+                isOpen={state.showStatusModal}
+                onClose={handleStatusModalClose}
+                status={state.statusModalProps.status}
+                error={state.statusModalProps.error}
+                title={state.statusModalProps.title}
+                message={state.statusModalProps.message}
+                onRetry={state.statusModalProps.onRetry}
+            />
         </div>
     );
 };

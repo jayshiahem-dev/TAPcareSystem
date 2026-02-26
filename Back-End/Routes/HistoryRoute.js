@@ -9,6 +9,13 @@ router
 
 router
   .route("/currentDay")
-  .get(authController.protect, HistoryController.DisplayHistoryTodayDistribution);
+  .get(
+    authController.protect,
+    HistoryController.DisplayHistoryTodayDistribution,
+  );
+
+router
+  .route("/displayBenificiaryAssistance/:assistanceId")
+  .get(authController.protect, HistoryController.displayHistoryBenificiaryAssistance);
 
 module.exports = router;

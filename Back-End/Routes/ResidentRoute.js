@@ -9,20 +9,38 @@ router
   .get(authController.protect, ResidentController.DisplayResidents)
   .post(
     authController.protect,
-    authController.restrict("admin","superadmin"),
+    authController.restrict("admin", "superadmin"),
     ResidentController.CreateResident,
   );
 
 router
+  .route("/display-by-municipality/:municipality")
+  .get(authController.protect, ResidentController.DisplayByMunicipality);
+
+router
+  .route("/GetHouseholdFullDetails/:householdId")
+  .get(authController.protect, ResidentController.GetHouseholdFullDetails);
+
+router
+  .route("/DisplayContinueSelectResidents/:assistanceId")
+  .get(
+    authController.protect,
+    ResidentController.DisplayContinueSelectResidents,
+  );
+
+router
+  .route("/barangay-names/:municipality")
+  .get(authController.protect, ResidentController.GetBarangayNamesOnly);
+router
   .route("/:id")
   .patch(
     authController.protect,
-    authController.restrict("admin","superadmin"),
+    authController.restrict("admin", "superadmin"),
     ResidentController.UpdateResident,
   )
   .delete(
     authController.protect,
-    authController.restrict("admin","superadmin"),
+    authController.restrict("admin", "superadmin"),
     ResidentController.DeleteResident,
   );
 
@@ -43,7 +61,7 @@ router
   .post(
     authController.protect,
     uploadExcel.single("file"),
-    authController.restrict("admin","superadmin"),
+    authController.restrict("admin", "superadmin"),
     ResidentController.UploadResidentsExcel,
   );
 
