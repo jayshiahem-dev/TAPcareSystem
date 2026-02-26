@@ -22,8 +22,7 @@
     "read-excel-file": "^6.0.3",
     "recharts": "^2.12.7",
     "socket.io-client": "^4.8.3",
-    "tailwind-merge": "^2.5.2",
-    "xlsx": "^0.18.5"
+    "tailwind-merge": "^2.5.2"
   },
   "devDependencies": {
     "@eslint/js": "^9.9.0",
